@@ -53,3 +53,7 @@ node --test
 ## Licença
 
 MIT — de Axolotl BR, para a internet.
+
+Logo: o cometa é o Twemoji ☄ (`renderer/assets/comet.svg`), de
+[jdecked/twemoji](https://github.com/jdecked/twemoji) —
+créditos: © Twitter, X e colaboradores, licença CC-BY 4.0.

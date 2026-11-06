@@ -30,6 +30,14 @@ h1.logo {
   margin: 0;
   font-size: 1.7rem;
   letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-emoji {
+  width: 34px;
+  height: 34px;
 }
 
 .tagline {
