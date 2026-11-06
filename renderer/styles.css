@@ -1,37 +1,55 @@
-/* Comet — placeholder styles; Task 8 brings the full visual identity. */
+/* Comet — Axolotl BR flavored: dark, calm, violet accent, no neon overload. */
 :root {
   color-scheme: dark;
+  --bg: #17151f;
+  --surface: #211e2b;
+  --border: #38324a;
+  --text: #e6e1f0;
+  --muted: #9d94b5;
+  --accent: #bb86fc;
+  --error: #ff6b7a;
 }
 
 body {
   margin: 0;
-  font-family: system-ui, sans-serif;
-  background: #17151f;
-  color: #e6e1f0;
+  font-family: system-ui, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .app {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 24px;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 28px 24px;
 }
 
 h1.logo {
   margin: 0;
+  font-size: 1.7rem;
+  letter-spacing: 0.5px;
 }
 
 .tagline {
   margin: 0;
-  opacity: 0.7;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 #url {
-  padding: 10px;
-  border-radius: 8px;
-  border: 1px solid #3a3547;
-  background: #211e2b;
-  color: inherit;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+#url:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .actions {
@@ -40,12 +58,24 @@ h1.logo {
 }
 
 button {
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid #3a3547;
-  background: #2a2535;
-  color: inherit;
+  padding: 9px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.92rem;
   cursor: pointer;
+  transition: background 120ms, transform 120ms;
+}
+
+button:hover:enabled {
+  background: #2c2738;
+  transform: translateY(-1px);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 button:disabled {
@@ -53,6 +83,49 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.stop {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.progress-wrap progress {
+  width: 100%;
+  height: 10px;
+}
+
+.progress-wrap progress::-webkit-progress-bar {
+  background: var(--surface);
+  border-radius: 6px;
+}
+
+.progress-wrap progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 6px;
+}
+
 .status {
-  min-height: 1.2em;
+  min-height: 1.4em;
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+footer {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.footer-row {
+  display: flex;
+  gap: 8px;
+}
+
+.folder-path,
+.versions {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }

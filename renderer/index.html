@@ -8,7 +8,7 @@
 </head>
 <body>
   <main class="app">
-    <h1 class="logo">Comet</h1>
+    <h1 class="logo">🫟 Comet</h1>
     <p class="tagline">Cole o link. Escolhe o formato. Chega junto.</p>
 
     <input id="url" type="text" placeholder="Link do YouTube ou do GIF" autocomplete="off" />
@@ -20,15 +20,18 @@
       <button id="btn-stop" class="stop" hidden>Parar</button>
     </div>
 
-    <div class="progress-wrap" hidden>
+    <div id="progress-wrap" class="progress-wrap" hidden>
       <progress id="progress" value="0" max="100"></progress>
     </div>
 
     <p id="status" class="status">Pronto.</p>
 
     <footer>
-      <button id="btn-folder" disabled>Pasta de destino</button>
-      <button id="btn-ytdlp-update" disabled>Atualizar yt-dlp</button>
+      <div class="footer-row">
+        <button id="btn-folder">Pasta de destino</button>
+        <button id="btn-ytdlp-update">Atualizar yt-dlp</button>
+      </div>
+      <p id="folder-path" class="folder-path"></p>
       <p id="versions" class="versions"></p>
     </footer>
   </main>
