@@ -29,6 +29,18 @@ test('sanitizeName falls back to comet on empty', () => {
   assert.strictEqual(sanitizeName('///***???'), 'comet');
 });
 
+test('sanitizeName strips trailing dots and spaces (Windows forbids)', () => {
+  assert.strictEqual(sanitizeName('My Video. '), 'My Video');
+  assert.strictEqual(sanitizeName('name....'), 'name');
+});
+
+test('sanitizeName prefixes reserved Windows device names', () => {
+  for (const reserved of ['CON', 'NUL', 'AUX', 'COM1', 'LPT9', 'nul']) {
+    assert.notStrictEqual(sanitizeName(reserved).toLowerCase(), reserved.toLowerCase());
+  }
+  assert.strictEqual(sanitizeName('CON'), 'comet-CON');
+});
+
 test('dedupeName returns name.ext when free', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'comet-'));
   const r = await dedupeName(dir, 'video', 'mp4');

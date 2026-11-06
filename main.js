@@ -8,12 +8,66 @@ const fs = require('node:fs');
 const { classifyLink } = require('./lib/linkclassify');
 const { sanitizeName, dedupeName } = require('./lib/naming');
 const { buildYtDlpArgs } = require('./lib/ytdlp-args');
-const { parseYtDlpError } = require('./lib/progress-parser');
-const { extractMediaUrl } = require('./lib/gif-extract');
+const { parseYtDlpError, detectSkip } = require('./lib/progress-parser');
+const { extractMediaUrl, gifRoute } = require('./lib/gif-extract');
 const runner = require('./lib/runner');
 
 const VENDOR = path.join(__dirname, 'vendor');
 const YT_DLP = path.join(VENDOR, 'yt-dlp.exe');
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+function clearTimer(timer) {
+  clearTimeout(timer);
+}
+
+async function sendDoneEvent(text) {
+  sendEvent({ type: 'done', text });
+}
+
+function humanizeNetworkError(err) {
+  const code = err?.cause?.code || err?.code;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return 'Sem internet (ou esse link não existe).';
+  }
+  if (code === 'ECONNRESET' || code === 'ECONNREFUSED') {
+    return 'A conexão caiu no meio. Tenta de novo.';
+  }
+  if (code === 'CERT_HAS_EXPIRED' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') {
+    return 'Certificado do site inválido, o Comet desistiu.';
+  }
+  return `Não consegui baixar (${err?.name || 'erro'})`;
+}
+
+async function downloadDirectGif(url, outDir, ext, signal) {
+  const res = await fetch(url, { signal });
+  if (!res.ok || !String(res.headers.get('content-type') || '').startsWith('image/')) {
+    throw new Error('Isso não abriu uma imagem — não achei GIF nesse link.');
+  }
+  await fs.mkdir(outDir, { recursive: true });
+  return saveGifFile(await res.arrayBuffer(), outDir, url, ext);
+}
+
+async function downloadPageGif(url, outDir, hostType, signal) {
+  const page = await fetch(url, { signal });
+  if (!page.ok) {
+    throw new Error('Não consegui abrir essa página do GIF.');
+  }
+  const media = extractMediaUrl(await page.text(), hostType);
+  if (!media) {
+    throw new Error('Não encontrei GIF nesse link.');
+  }
+  const img = await fetch(media.url, { signal });
+  const contentType = String(img.headers.get('content-type') || '');
+  if (!img.ok || !contentType.startsWith('image/')) {
+    throw new Error('Não encontrei GIF nesse link.');
+  }
+  // Trust the real content type over a guessed extension when they collide.
+  const guessedExt = media.ext;
+  const realExt = contentType.split('image/')[1]?.split(';')[0] || guessedExt || '';
+  const fileExt = realExt || 'gif';
+  await fs.mkdir(outDir, { recursive: true });
+  return saveGifFile(await img.arrayBuffer(), outDir, media.url, fileExt);
+}
 
 // Tracked child processes live in lib/runner.js.
 const killAllTracked = runner.killAll;
@@ -140,7 +194,10 @@ ipcMain.handle('comet:download', async (_e, { url, kind, opts }) => {
     }
 
     const template = path.join(outDir, '%(title)s.%(ext)s');
-    const args = buildYtDlpArgs({ kind, url, outputTemplate: template });
+    const args = buildYtDlpArgs({
+      kind, url, outputTemplate: template,
+      ffmpegLocation: path.join(VENDOR, 'ffmpeg.exe'),
+    });
 
     const result = await runner.runBinary({
       cmd: YT_DLP,
@@ -155,44 +212,47 @@ ipcMain.handle('comet:download', async (_e, { url, kind, opts }) => {
       sendEvent({ type: 'error', text: err });
       return { ok: false, error: err };
     }
+    if (detectSkip(result.stdout)) {
+      await sendDoneEvent('Esse já estava salvo nessa pasta.');
+      return { ok: true, file: 'already-existed' };
+    }
+    await sendDoneEvent('Pronto, arquivo que entrou na pasta.');
     return { ok: true };
   }
 
   if (kind === 'gif') {
-    if (!GIF_KINDS.has(info.type)) {
+    const route = GIF_KINDS.has(info.type) ? gifRoute(info) : null;
+    if (!route) {
       return { ok: false, error: 'Isso não parece um link de GIF.' };
     }
-    if (info.type === 'direct-image') {
-      const res = await fetch(url);
-      if (!res.ok || !String(res.headers.get('content-type') || '').startsWith('image/')) {
-        return { ok: false, error: 'Não consegui baixar esse GIF.' };
-      }
-      await fs.mkdir(outDir, { recursive: true });
-      const file = await saveGifFile(await res.arrayBuffer(), outDir, url, info.ext);
+
+    const controller = new AbortController();
+    const token = runner.beginCustom({
+      onAbort: () => controller.abort(),
+      outDir,
+    });
+    // Hung server never leaves the UI stuck: hard ceiling.
+    const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+
+    try {
+      const file = route.kind === 'direct'
+        ? await downloadDirectGif(url, outDir, route.ext, controller.signal)
+        : await downloadPageGif(url, outDir, info.type, controller.signal);
+      clearTimer(timer);
+      await sendDoneEvent(`Pronto: ${path.basename(file)}`);
       return { ok: true, file };
+    } catch (err) {
+      clearTimer(timer);
+      if (err?.name === 'AbortError' || controller.signal.aborted) {
+        sendEvent({ type: 'error', text: 'Download parado.' });
+        return { ok: false, cancelled: true };
+      }
+      const errText = humanizeNetworkError(err);
+      sendEvent({ type: 'error', text: errText });
+      return { ok: false, error: errText };
+    } finally {
+      runner.endCustom(token);
     }
-
-    // Tenor/Giphy page: extract the real media URL, then download it.
-    const page = await fetch(url);
-    if (!page.ok) {
-      return { ok: false, error: 'Não consegui abrir esse link.' };
-    }
-    const media = extractMediaUrl(await page.text(), info.type);
-    if (!media) {
-      return { ok: false, error: 'Não encontrei GIF nesse link.' };
-    }
-    const img = await fetch(media.url);
-    const contentType = String(img.headers.get('content-type') || '');
-    const fileExt = media.ext && media.ext !== '.'
-      ? media.ext
-      : contentType.split('image/')[1]?.split(';')[0] || '';
-
-    if (!img.ok || !contentType.startsWith('image/')) {
-      return { ok: false, error: 'Não encontrei GIF nesse link.' };
-    }
-    await fs.mkdir(outDir, { recursive: true });
-    const file = await saveGifFile(await img.arrayBuffer(), outDir, media.url, fileExt);
-    return { ok: true, file };
   }
 
   return { ok: false, error: 'Formato desconhecido.' };

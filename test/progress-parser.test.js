@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { parseProgress, parseYtDlpError } = require('../lib/progress-parser');
+const { parseProgress, parseYtDlpError, detectSkip } = require('../lib/progress-parser');
 
 test('parseProgress extracts percent from yt-dlp download lines', () => {
   assert.deepStrictEqual(parseProgress('[download]  42.7% of 5.0MiB'), { percent: 42.7, stage: 'download' });
@@ -27,4 +27,13 @@ test('parseYtDlpError returns the clean ERROR line', () => {
 
 test('parseYtDlpError falls back to a generic message', () => {
   assert.strictEqual(parseYtDlpError('nothing here'), 'Erro no download.');
+});
+
+test('detectSkip flags the already-downloaded skip case', () => {
+  assert.strictEqual(
+    detectSkip("[download] x has already been downloaded"),
+    true,
+  );
+  assert.strictEqual(detectSkip('[download] working'), false);
+  assert.strictEqual(typeof detectSkip, 'function');
 });
