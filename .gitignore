@@ -1,0 +1,5 @@
+node_modules/
+vendor/
+downloads/
+*.part
+.superpowers/

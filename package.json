@@ -1,0 +1,17 @@
+{
+  "name": "comet",
+  "version": "0.1.0",
+  "description": "Baixa vídeos do YouTube (.mp4/.mp3) e GIFs por link — de player pra player.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "Axolotl BR",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
+  }
+}

@@ -1,0 +1,58 @@
+/* Comet — placeholder styles; Task 8 brings the full visual identity. */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #17151f;
+  color: #e6e1f0;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+}
+
+h1.logo {
+  margin: 0;
+}
+
+.tagline {
+  margin: 0;
+  opacity: 0.7;
+}
+
+#url {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #3a3547;
+  background: #211e2b;
+  color: inherit;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #3a3547;
+  background: #2a2535;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.status {
+  min-height: 1.2em;
+}
