@@ -1,8 +1,9 @@
 // Comet — Electron main process.
 // Owns child processes, config, and all IPC. Logic lives in lib/ modules.
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
-const fs = require('node:fs/promises');
+const fsp = require('node:fs/promises');
+const fs = require('node:fs');
 
 const { classifyLink } = require('./lib/linkclassify');
 const { sanitizeName, dedupeName } = require('./lib/naming');
@@ -16,6 +17,24 @@ const YT_DLP = path.join(VENDOR, 'yt-dlp.exe');
 
 // Tracked child processes live in lib/runner.js.
 const killAllTracked = runner.killAll;
+
+// --- Config (user's save folder persists here) ---
+const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json');
+let config = { saveDir: null };
+
+function readConfig() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    if (parsed && typeof parsed === 'object') config = { ...config, ...parsed };
+  } catch { /* missing or unreadable: keep defaults */ }
+}
+
+async function writeConfig() {
+  await fsp.mkdir(path.dirname(CONFIG_FILE), { recursive: true });
+  await fsp.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+readConfig();
 
 function createWindow() {
   win = new BrowserWindow({
@@ -54,9 +73,25 @@ function sendEvent(payload) {
   if (win && !win.isDestroyed()) win.webContents.send('comet:event', payload);
 }
 
-// Task 9 replaces this with the persisted config; Downloads until then.
+// config saveDir (validated) wins; Downloads is the initial default.
 async function getOutDir() {
-  return app.getPath('downloads');
+  const fallback = app.getPath('downloads');
+  if (config.saveDir) {
+    try {
+      const stat = await fsp.stat(config.saveDir);
+      if (stat.isDirectory()) return config.saveDir;
+    } catch { /* stale path in config: fall back */ }
+  }
+  return fallback;
+}
+
+// The #1 expected failure mode: YouTube extractor drift / outdated yt-dlp.
+// When the error smells like that, point the user at the update button.
+function humanizeError(text) {
+  const message = parseYtDlpError(text);
+  return /sign in|confirm|unable to extract|nsig|extractor/i.test(message)
+    ? `${message.replace(/\s+— tenta o botão.*$/, '')} — tenta o botão 'Atualizar yt-dlp'.`
+    : message;
 }
 
 const GIF_KINDS = new Set(['tenor', 'giphy', 'direct-image']);
@@ -116,7 +151,7 @@ ipcMain.handle('comet:download', async (_e, { url, kind, opts }) => {
 
     if (result.cancelled) return { ok: false, cancelled: true };
     if (!result.ok) {
-      const err = parseYtDlpError(result.stderr);
+      const err = humanizeError(result.stderr);
       sendEvent({ type: 'error', text: err });
       return { ok: false, error: err };
     }
@@ -169,6 +204,34 @@ ipcMain.handle('comet:cancel', () => {
   return { ok: killed };
 });
 
-ipcMain.handle('comet:folder-get', () => ({ ok: false, error: 'Nem tudo instalado ainda.' }));
-ipcMain.handle('comet:folder-set', () => ({ ok: false, error: 'Nem tudo instalado ainda.' }));
-ipcMain.handle('comet:ytdlp-update', () => ({ ok: false, error: 'Nem tudo instalado ainda.' }));
+ipcMain.handle('comet:folder-get', async () => ({
+  ok: true,
+  path: await getOutDir(),
+}));
+
+ipcMain.handle('comet:folder-set', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Onde o Comet salva?',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: false, error: 'Sem pasta escolhida.' };
+  }
+  config.saveDir = result.filePaths[0];
+  await writeConfig();
+  return { ok: true };
+});
+
+ipcMain.handle('comet:ytdlp-update', async () => {
+  if (!fs.existsSync(YT_DLP)) {
+    return { ok: false, error: 'yt-dlp não encontrado — rode o script de instalação (scripts/fetch-binaries.ps1).' };
+  }
+  const result = await runner.runBinary({ cmd: YT_DLP, args: ['-U'] });
+  if (result.cancelled) return { ok: false, error: 'Atualização parada.' };
+  if (!result.ok) {
+    return { ok: false, error: humanizeError(result.stderr || result.stdout) };
+  }
+  const lines = (result.stderr || result.stdout || '').split(/\r?\n/).filter(Boolean);
+  sendEvent({ type: 'status', text: lines[lines.length - 1] || 'yt-dlp atualizado.' });
+  return { ok: true, text: lines[lines.length - 1] || 'yt-dlp atualizado.' };
+});
