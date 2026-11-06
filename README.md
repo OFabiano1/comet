@@ -18,6 +18,14 @@ powershell -ExecutionPolicy Bypass -File scripts\fetch-binaries.ps1
 npm start
 ```
 
+Ou sem Node: rode o executável portátil em `dist\Comet-win32-x64\Comet.exe`. Gerar de novo:
+
+```powershell
+npm run package
+```
+
+Se o `.exe` reclamar de `yt-dlp`, rode `scripts\fetch-binaries.ps1` uma vez e execute `npm run package` de novo (os binários vão embutidos no pacote).
+
 `fetch-binaries.ps1` baixa `yt-dlp.exe` e `ffmpeg.exe` para `vendor/` (git-ignored — nunca commitados).
 
 ## Atualizar yt-dlp
