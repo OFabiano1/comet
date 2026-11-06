@@ -8,6 +8,7 @@ const { classifyLink } = require('./lib/linkclassify');
 const { sanitizeName, dedupeName } = require('./lib/naming');
 const { buildYtDlpArgs } = require('./lib/ytdlp-args');
 const { parseYtDlpError } = require('./lib/progress-parser');
+const { extractMediaUrl } = require('./lib/gif-extract');
 const runner = require('./lib/runner');
 
 const VENDOR = path.join(__dirname, 'vendor');
@@ -135,8 +136,28 @@ ipcMain.handle('comet:download', async (_e, { url, kind, opts }) => {
       const file = await saveGifFile(await res.arrayBuffer(), outDir, url, info.ext);
       return { ok: true, file };
     }
-    // Page extraction (Tenor/Giphy) lands in Task 7.
-    return { ok: false, error: 'Nem tudo instalado ainda.' };
+
+    // Tenor/Giphy page: extract the real media URL, then download it.
+    const page = await fetch(url);
+    if (!page.ok) {
+      return { ok: false, error: 'Não consegui abrir esse link.' };
+    }
+    const media = extractMediaUrl(await page.text(), info.type);
+    if (!media) {
+      return { ok: false, error: 'Não encontrei GIF nesse link.' };
+    }
+    const img = await fetch(media.url);
+    const contentType = String(img.headers.get('content-type') || '');
+    const fileExt = media.ext && media.ext !== '.'
+      ? media.ext
+      : contentType.split('image/')[1]?.split(';')[0] || '';
+
+    if (!img.ok || !contentType.startsWith('image/')) {
+      return { ok: false, error: 'Não encontrei GIF nesse link.' };
+    }
+    await fs.mkdir(outDir, { recursive: true });
+    const file = await saveGifFile(await img.arrayBuffer(), outDir, media.url, fileExt);
+    return { ok: true, file };
   }
 
   return { ok: false, error: 'Formato desconhecido.' };
