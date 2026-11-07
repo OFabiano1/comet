@@ -10,6 +10,8 @@ const { sanitizeName, dedupeName } = require('./lib/naming');
 const { buildYtDlpArgs } = require('./lib/ytdlp-args');
 const { parseYtDlpError, detectSkip } = require('./lib/progress-parser');
 const { extractMediaUrl, gifRoute } = require('./lib/gif-extract');
+const { isVideoKindUrl } = require('./lib/platforms');
+const { ensureBinaries, missingBinaries } = require('./lib/binaries-fetch');
 const runner = require('./lib/runner');
 
 const VENDOR = path.join(__dirname, 'vendor');
@@ -186,11 +188,33 @@ ipcMain.handle('comet:download', async (_e, { url, kind, opts }) => {
   const info = classifyLink(url);
 
   if (kind === 'mp4' || kind === 'mp3') {
-    if (info.type !== 'youtube') {
-      return { ok: false, error: 'Isso não parece um link de vídeo do YouTube.' };
+    if (!isVideoKindUrl(info)) {
+      return { ok: false, error: 'Isso não parece um link de vídeo (o Comet aceita YouTube, TikTok, Instagram, X, Twitch, Pinterest e GIFs).' };
     }
-    if (!fs.existsSync(YT_DLP)) {
-      return { ok: false, error: 'yt-dlp não encontrado — rode o script de instalação (scripts/fetch-binaries.ps1).' };
+
+    // Fresh clone or first run: fetch the vendor binaries on the spot.
+    if (missingBinaries(VENDOR).length > 0) {
+      const controller0 = new AbortController();
+      const token0 = runner.beginCustom({ onAbort: () => controller0.abort() });
+      try {
+        const fetched = await ensureBinaries({
+          vendorDir: VENDOR,
+          signal: controller0.signal,
+          onStatus: (t) => sendEvent({ type: 'status', text: t }),
+        });
+        if (!fetched.ok) {
+          const err = 'Não consegui baixar os binários do yt-dlp/ffmpeg — confere a internet e tenta de novo.';
+          sendEvent({ type: 'error', text: err });
+          return { ok: false, error: err };
+        }
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          return { ok: false, cancelled: true };
+        }
+        throw err;
+      } finally {
+        runner.endCustom(token0);
+      }
     }
 
     const template = path.join(outDir, '%(title)s.%(ext)s');
