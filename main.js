@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const { classifyLink } = require('./lib/linkclassify');
 const { sanitizeName, dedupeName } = require('./lib/naming');
 const { buildYtDlpArgs } = require('./lib/ytdlp-args');
-const { parseYtDlpError, detectSkip } = require('./lib/progress-parser');
+const { parseYtDlpError, detectSkip, detectLoginWall } = require('./lib/progress-parser');
 const { extractMediaUrl, gifRoute } = require('./lib/gif-extract');
 const { isVideoKindUrl } = require('./lib/platforms');
 const { ensureBinaries, missingBinaries } = require('./lib/binaries-fetch');
@@ -143,8 +143,12 @@ async function getOutDir() {
 
 // The #1 expected failure mode: YouTube extractor drift / outdated yt-dlp.
 // When the error smells like that, point the user at the update button.
-function humanizeError(text) {
+function humanizeError(text, info) {
   const message = parseYtDlpError(text);
+  if (detectLoginWall(message)) {
+    const site = info?.type === 'platform' ? 'esse site' : 'esse post';
+    return `${message} — ${site} pediu login e o Comet não tem login (dados seus, nenhum). Tenta outro post.`;
+  }
   return /sign in|confirm|unable to extract|nsig|extractor/i.test(message)
     ? `${message.replace(/\s+— tenta o botão.*$/, '')} — tenta o botão 'Atualizar yt-dlp'.`
     : message;
@@ -232,7 +236,7 @@ ipcMain.handle('comet:download', async (_e, { url, kind, opts }) => {
 
     if (result.cancelled) return { ok: false, cancelled: true };
     if (!result.ok) {
-      const err = humanizeError(result.stderr);
+      const err = humanizeError(result.stderr, info);
       sendEvent({ type: 'error', text: err });
       return { ok: false, error: err };
     }

@@ -4,9 +4,13 @@ Sua comunidade na internet, de player pra player — e seu downloader de confian
 
 Comet baixa:
 
-- **Vídeo do YouTube** como `.mp4` (até 1080p)
-- **Áudio do YouTube** como `.mp3` (192 kbps)
-- **GIF por link** — URL direta (`media.tenor.com/.../algo.gif`) ou página do [Tenor](https://tenor.com) / [Giphy](https://giphy.com)
+- **Vídeo** como `.mp4` (até 1080p) de **YouTube, TikTok, Instagram, X/Twitter, Twitch, Pinterest** e os demais ~1800 sites que o yt-dlp suporta.
+- **Áudio** como `.mp3` (192 kbps) das mesmas fontes.
+- **GIF por link** — URL direta (`media.tenor.com/.../algo.gif`) ou página do [Tenor](https://tenor.com) / [Giphy](https://giphy.com).
+
+Primeira execução sem `vendor/` (clone do GitHub, primeiro `.exe`): o Comet baixa `yt-dlp.exe` + `ffmpeg.exe` sozinho no primeiro download.
+
+Limitações: posts que exigem login (Instagram restringe bastante) falham com mensagem clara — o Comet não tem login por design. "GIFs" de Twitter/TikTok vêm como `.mp4` (o site entrega assim).
 
 ## Como rodar
 

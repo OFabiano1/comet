@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { parseProgress, parseYtDlpError, detectSkip } = require('../lib/progress-parser');
+const { parseProgress, parseYtDlpError, detectSkip, detectLoginWall } = require('../lib/progress-parser');
 
 test('parseProgress extracts percent from yt-dlp download lines', () => {
   assert.deepStrictEqual(parseProgress('[download]  42.7% of 5.0MiB'), { percent: 42.7, stage: 'download' });
@@ -36,4 +36,10 @@ test('detectSkip flags the already-downloaded skip case', () => {
   );
   assert.strictEqual(detectSkip('[download] working'), false);
   assert.strictEqual(typeof detectSkip, 'function');
+});
+
+test('detectLoginWall smells account walls on any platform', () => {
+  assert.strictEqual(detectLoginWall('ERROR: [instagram] Sign in to confirm'), true);
+  assert.strictEqual(detectLoginWall('ERROR: This content requires login'), true);
+  assert.strictEqual(detectLoginWall('ERROR: [youtube] nothing accountish'), false);
 });
