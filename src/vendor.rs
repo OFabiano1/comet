@@ -33,14 +33,29 @@ async fn set_status(app: &Arc<Mutex<App>>, msg: String) {
     app.lock().await.status = msg;
 }
 
+/// Sufixo único por processo e por chamada: tarefas concorrentes nunca
+/// escrevem no mesmo arquivo temporário.
+fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 async fn fetch_to_file(app: &Arc<Mutex<App>>, url: &str, dest: &Path, label: &str) -> Result<()> {
+    // Temp único por processo: duas instâncias não escrevem no mesmo arquivo.
+    let temp = dest.with_extension(format!("tmp-{}", unique_suffix()));
     let resp = reqwest::get(url).await?.error_for_body()?;
     let total = resp.content_length();
-    let mut file = tokio::fs::File::create(dest).await?;
+    let mut file = tokio::fs::File::create(&temp).await?;
     let mut stream = resp.bytes_stream();
     let mut got: u64 = 0;
     use tokio::io::AsyncWriteExt;
-    while let Some(chunk) = stream.try_next().await.map_err(|e| anyhow::anyhow!(e))? {        file.write_all(&chunk).await?;
+    while let Some(chunk) = stream.try_next().await.map_err(|e| anyhow::anyhow!(e))? {
+        file.write_all(&chunk).await?;
         got += chunk.len() as u64;
         let msg = match total {
             Some(t) => format!("{label} · {:.0}%", got as f64 / t as f64 * 100.0),
@@ -49,6 +64,16 @@ async fn fetch_to_file(app: &Arc<Mutex<App>>, url: &str, dest: &Path, label: &st
         set_status(app, msg).await;
     }
     file.flush().await?;
+    drop(file);
+    // Destino já existe (outra instância resolveu antes): mantém o existente.
+    if dest.exists() {
+        let _ = tokio::fs::remove_file(&temp).await;
+    } else if let Err(e) = tokio::fs::rename(&temp, dest).await {
+        let _ = tokio::fs::remove_file(&temp).await;
+        if !dest.exists() {
+            return Err(anyhow::anyhow!(e));
+        }
+    }
     Ok(())
 }
 
@@ -65,21 +90,41 @@ impl ErrorForBody for reqwest::Response {
 fn extract_exes(zip_path: &Path, dest_dir: &Path) -> Result<()> {
     let file = std::fs::File::open(zip_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
+    let staging = dest_dir.join(format!(".staging-{}", unique_suffix()));
+    std::fs::create_dir_all(&staging)?;
+    let mut found_ffmpeg = false;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
         let name = entry.name().to_ascii_lowercase();
         let base = match name.rsplit('/').next() {
-            Some("ffmpeg.exe") => "ffmpeg.exe",
+            Some("ffmpeg.exe") => {
+                found_ffmpeg = true;
+                "ffmpeg.exe"
+            }
             Some("ffprobe.exe") => "ffprobe.exe",
             _ => continue,
         };
-        let mut out = std::fs::File::create(dest_dir.join(base))?;
+        let mut out = std::fs::File::create(staging.join(base))?;
         std::io::copy(&mut entry, &mut out)?;
     }
-    if !dest_dir.join("ffmpeg.exe").is_file() {
+    // Binário já instalado nunca é sobrescrito: evita corromper outra instância.
+    for base in ["ffmpeg.exe", "ffprobe.exe"] {
+        let staged = staging.join(base);
+        let dest = dest_dir.join(base);
+        if staged.is_file() && !dest.exists() {
+            let _ = std::fs::rename(&staged, &dest);
+        }
+    }
+    let _ = std::fs::remove_dir_all(&staging);
+    if !found_ffmpeg && !dest_dir.join("ffmpeg.exe").is_file() {
         anyhow::bail!("FFMPEG NÃO ENCONTRADO NO ZIP");
     }
     Ok(())
+}
+
+/// Nome estável para os testes e para a instalação.
+pub fn install_ffmpeg_zip(zip_path: &Path, dest_dir: &Path) -> Result<()> {
+    extract_exes(zip_path, dest_dir)
 }
 
 pub async fn ensure_binaries(app: &Arc<Mutex<App>>) -> Result<(PathBuf, PathBuf)> {
@@ -123,7 +168,7 @@ pub async fn ensure_binaries(app: &Arc<Mutex<App>>) -> Result<(PathBuf, PathBuf)
         set_status(app, "EXTRAINDO FFMPEG".to_string()).await;
         let z = zip_path.clone();
         let d = dir.clone();
-        tokio::task::spawn_blocking(move || extract_exes(&z, &d))
+        tokio::task::spawn_blocking(move || install_ffmpeg_zip(&z, &d))
             .await
             .map_err(|e| anyhow::anyhow!(e))??;
         let _ = tokio::fs::remove_file(&zip_path).await;
@@ -153,6 +198,43 @@ mod tests {
         if let Ok(l) = std::env::var("LOCALAPPDATA") {
             assert_eq!(bin_dir(), PathBuf::from(l).join("comet").join("bin"));
         }
+    }
+
+    #[test]
+    fn install_ffmpeg_does_not_overwrite_existing_binary() {
+        let dir = std::env::temp_dir().join("comet-install-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip_path = dir.join("ffmpeg.zip");
+        make_fake_ffmpeg_zip(&zip_path, b"from-zip");
+        let dest = dir.join("bin");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("ffmpeg.exe"), b"already-installed").unwrap();
+
+        install_ffmpeg_zip(&zip_path, &dest).unwrap();
+        assert_eq!(
+            std::fs::read(dest.join("ffmpeg.exe")).unwrap(),
+            b"already-installed",
+            "binario instalado foi sobrescrito"
+        );
+        assert!(dest.join("ffprobe.exe").is_file());
+        let leftovers: Vec<_> = std::fs::read_dir(&dest)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".staging"))
+            .collect();
+        assert!(leftovers.is_empty(), "staging nao limpo: {:?}", leftovers);
+    }
+
+    fn make_fake_ffmpeg_zip(path: &Path, content: &[u8]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default();
+        zip.start_file("bin/ffmpeg.exe", opts).unwrap();
+        std::io::Write::write_all(&mut zip, content).unwrap();
+        zip.start_file("bin/ffprobe.exe", opts).unwrap();
+        std::io::Write::write_all(&mut zip, content).unwrap();
+        zip.finish().unwrap();
     }
 
     #[tokio::test]
