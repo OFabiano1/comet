@@ -1,4 +1,5 @@
 use crate::app::{App, Kind, Phase, Progress, VideoInfo};
+use crate::sites::Site;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -150,19 +151,33 @@ fn truncate_msg(s: &str) -> String {
     }
 }
 
-pub fn extract_final_path(line: &str) -> Option<String> {
-    let t = line.trim();
-    if t.is_empty() || t.starts_with('[') || t.contains(' ') {
-        return None;
-    }
-    let looks_like_path = t.contains('\\') || t.contains('/');
-    let looks_like_media = [".mp4", ".webm", ".mkv", ".mov", ".gif"]
-        .iter()
-        .any(|ext| t.to_ascii_lowercase().ends_with(ext));
-    if looks_like_path || looks_like_media {
-        Some(t.to_string())
-    } else {
-        None
+/// `FILE:<caminho final>` — prefixo explícito; caminho com espaço é o caso comum.
+pub fn parse_saved(line: &str) -> Option<PathBuf> {
+    line.strip_prefix("FILE:")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Título de tweet/TikTok costuma ser só "Fulano - https://t.co/…": vira nome ilegível
+/// e repetido. Tira link, sobra de separador e, se nada sobrar, chama de "vídeo".
+pub fn title_cleanup_args() -> Vec<String> {
+    [
+        (r"https?://\S+", ""),
+        (r"^[\s\-–—:|]+|[\s\-–—:|]+$", ""),
+        (r"^$", "vídeo"),
+    ]
+    .iter()
+    .flat_map(|(re, to)| ["--replace-in-metadata", "title", re, to])
+    .map(str::to_string)
+    .collect()
+}
+
+/// YouTube tem título único; tweet e TikTok repetem, então o id evita sobrescrever.
+pub fn output_template(site: Site) -> &'static str {
+    match site {
+        Site::YouTube => "%(title).80B.%(ext)s",
+        Site::Twitter | Site::TikTok => "%(title).60B [%(id)s].%(ext)s",
     }
 }
 
@@ -184,12 +199,12 @@ pub async fn download(
     ytdlp: &Path,
     _ffmpeg: &Path,
 ) -> Result<()> {
-    let (url, out_dir) = {
+    let (url, site, out_dir) = {
         let mut a = app.lock().await;
         let item = &mut a.items[idx];
         item.phase = Phase::Downloading;
         item.progress = Progress::default();
-        (item.url.clone(), downloads_dir())
+        (item.url.clone(), item.site, downloads_dir())
     };
     tokio::fs::create_dir_all(&out_dir).await?;
 
@@ -203,14 +218,15 @@ pub async fn download(
         "--progress-template".to_string(),
         PROGRESS_TEMPLATE.to_string(),
         "--print".to_string(),
-        "after_move:filepath".to_string(),
+        "after_move:FILE:%(filepath)s".to_string(),
         "--print".to_string(),
         "TITLE:%(title)s".to_string(),
         "--print".to_string(),
         "INFO:%(uploader,channel)s|%(duration)s".to_string(),
         "-o".to_string(),
-        "%(title).80B.%(ext)s".to_string(),
+        output_template(site).to_string(),
     ];
+    args.extend(title_cleanup_args());
     args.extend(browser_cookie_args());
     args.push(url.clone());
 
@@ -243,7 +259,7 @@ pub async fn download(
                         app2.lock().await.items[idx].title = title;
                     } else if let Some(info) = parse_info(l) {
                         app2.lock().await.items[idx].info = info;
-                    } else if let Some(path) = extract_final_path(l) {
+                    } else if let Some(path) = parse_saved(l) {
                         final_path = Some(path);
                     }
                 }
@@ -279,6 +295,7 @@ pub async fn download(
         let mut a = app.lock().await;
         if status.success() {
             a.completed += 1;
+            a.items[idx].saved = final_path.clone();
             (a.items[idx].kind, true)
         } else {
             let item = &mut a.items[idx];
@@ -289,7 +306,7 @@ pub async fn download(
     };
     if ok && kind == Kind::Gif {
         if let Some(mp4) = final_path {
-            to_gif(app, idx, _ffmpeg, Path::new(&mp4)).await?;
+            to_gif(app, idx, _ffmpeg, &mp4).await?;
         } else {
             let mut a = app.lock().await;
             a.items[idx].phase = Phase::Done;
@@ -353,7 +370,10 @@ pub async fn to_gif(app: &Arc<Mutex<App>>, idx: usize, ffmpeg: &Path, mp4: &Path
     let mut a = app.lock().await;
     let item = &mut a.items[idx];
     match conv {
-        Ok(()) => item.phase = Phase::Done,
+        Ok(()) => {
+            item.phase = Phase::Done;
+            item.saved = Some(gif);
+        }
         Err(_) => {
             item.phase = Phase::Done;
             item.error = Some(GIF_FAILED.to_string());
@@ -473,14 +493,30 @@ mod tests {
     }
 
     #[test]
-    fn extracts_final_filepath_line() {
+    fn parses_saved_file_line_with_spaces() {
+        // Antes, linha com espaço era descartada: GIF falhava em quase todo título.
         assert_eq!(
-            extract_final_path("C:\\Users\\F\\Downloads\\Comet\\video.mp4"),
-            Some("C:\\Users\\F\\Downloads\\Comet\\video.mp4".to_string())
+            parse_saved("FILE:C:\\Users\\F\\Downloads\\Comet\\Me at the zoo.mp4"),
+            Some(PathBuf::from(
+                "C:\\Users\\F\\Downloads\\Comet\\Me at the zoo.mp4"
+            ))
         );
-        assert_eq!(extract_final_path("[download] 100% of 2MiB"), None);
-        assert_eq!(extract_final_path("[PROG] 50%|2MiB|1MiB"), None);
-        assert_eq!(extract_final_path("has already been downloaded"), None);
+        assert_eq!(parse_saved("C:\\x\\video.mp4"), None);
+        assert_eq!(parse_saved("[download] 100% of 2MiB"), None);
+        assert_eq!(parse_saved("FILE:"), None);
+    }
+
+    #[test]
+    fn output_names_keep_tweets_unique() {
+        assert_eq!(output_template(Site::YouTube), "%(title).80B.%(ext)s");
+        assert!(output_template(Site::Twitter).contains("[%(id)s]"));
+        assert!(output_template(Site::TikTok).contains("[%(id)s]"));
+        let args = title_cleanup_args();
+        assert_eq!(args.len(), 12);
+        assert_eq!(
+            args[..3],
+            ["--replace-in-metadata", "title", r"https?://\S+"]
+        );
     }
 
     #[test]
@@ -547,6 +583,7 @@ mod tests {
             info: VideoInfo::default(),
             progress: Progress::default(),
             error: None,
+            saved: None,
         });
         to_gif(&app, 0, ffmpeg, &mp4).await.unwrap();
         assert!(dir.join("src.gif").is_file());

@@ -31,7 +31,7 @@ Cole a URL (Ctrl+V) no campo e aperte **Enter**. Depois:
 | `Enter` | Adiciona URL à fila |
 | `D` | Baixa a fila |
 | `G` | Alterna GIF no item selecionado (Twitter) |
-| `O` | Abre a pasta de downloads |
+| `O` | Abre a pasta com o arquivo do item selecionado já marcado |
 | `↑` / `↓` | Move a seleção |
 | `Q` / `Esc` / `Ctrl+C` | Sai |
 
@@ -45,7 +45,9 @@ Twitter/X e TikTok pedem cookies: o Comet usa os cookies do Chrome, Edge ou
 Brave instalados na máquina (`--cookies-from-browser`). Sem isso, a
 plataforma bloqueia o download.
 
-Downloads vão para `%USERPROFILE%\Downloads\Comet\`.
+Downloads vão para `%USERPROFILE%\Downloads\Comet\` (subpasta `Comet`, não a
+raiz de Downloads). Tweet e TikTok levam o id no nome, como `Layne [1855…].mp4`,
+e link no texto do post é tirado do nome.
 
 No primeiro uso, o Comet baixa `yt-dlp` e `ffmpeg` sozinhos para
 `%LOCALAPPDATA%\comet\bin` (mostra o progresso na tela). Se `vendor\`

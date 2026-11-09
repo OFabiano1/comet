@@ -25,6 +25,8 @@ pub struct Item {
     pub info: VideoInfo,
     pub progress: Progress,
     pub error: Option<String>,
+    /// Onde o arquivo final ficou (mp4, ou gif depois de converter).
+    pub saved: Option<std::path::PathBuf>,
 }
 
 /// Dados do vídeo que o yt-dlp devolve antes de baixar.
@@ -101,6 +103,7 @@ impl App {
             info: VideoInfo::default(),
             progress: Progress::default(),
             error: None,
+            saved: None,
         });
         self.selected = self.items.len() - 1;
         self.input.clear();

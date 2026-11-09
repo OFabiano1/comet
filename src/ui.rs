@@ -67,13 +67,26 @@ fn phase_chip(item: &Item) -> (String, Style) {
         (Phase::Queued, _) => ("na fila".to_string(), fg(TEXT_MUTED)),
         (Phase::Downloading, _) => ("baixando".to_string(), fg(PRIMARY_HOVER)),
         (Phase::Converting, _) => ("convertendo pra gif".to_string(), fg(PRIMARY_HOVER)),
-        (Phase::Done, None) => ("✓ pronto".to_string(), fg(SUCCESS)),
+        (Phase::Done, None) => match item.saved.as_deref().and_then(short_folder) {
+            Some(folder) => (format!("✓ salvo em {folder} · o mostra"), fg(SUCCESS)),
+            None => ("✓ pronto".to_string(), fg(SUCCESS)),
+        },
         (Phase::Done, Some(note)) => (format!("! {note}"), fg(WARNING)),
         (Phase::Failed, err) => (
             format!("✗ {}", err.as_deref().unwrap_or("o download falhou")),
             fg(DANGER),
         ),
     }
+}
+
+/// `C:\Users\x\Downloads\Comet\a.mp4` → `Downloads\Comet`: o bastante pra achar a pasta.
+pub fn short_folder(file: &std::path::Path) -> Option<String> {
+    let dir = file.parent()?;
+    let name = dir.file_name()?.to_string_lossy();
+    Some(match dir.parent().and_then(|p| p.file_name()) {
+        Some(up) => format!("{}\\{name}", up.to_string_lossy()),
+        None => name.to_string(),
+    })
 }
 
 fn ext_of(item: &Item) -> &'static str {
@@ -487,11 +500,22 @@ mod tests {
                 audio: false,
             },
             error: error.map(str::to_string),
+            saved: None,
         }
     }
 
     #[test]
     fn final_states_carry_text_not_only_color() {
+        let mut saved = item(Phase::Done, None);
+        saved.saved = Some(std::path::PathBuf::from(
+            "C:\\Users\\F\\Downloads\\Comet\\Layne [1].mp4",
+        ));
+        let app = App {
+            items: vec![saved],
+            ..App::default()
+        };
+        assert!(render(&app, 80, 24).contains("✓ salvo em Downloads\\Comet · o mostra"));
+
         for (phase, error, expected) in [
             (Phase::Done, None, "✓ pronto"),
             (

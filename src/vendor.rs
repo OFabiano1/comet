@@ -248,27 +248,52 @@ mod tests {
         assert!(ff.is_file());
     }
 
-    #[tokio::test]
-    #[ignore = "download real de rede; rodar com `cargo test --ignored`"]
-    async fn real_youtube_download_end_to_end() {
+    /// Baixa "Me at the zoo" (19s, título com espaços) do jeito que a fila faz.
+    async fn real_zoo_download(kind: crate::app::Kind) -> Arc<Mutex<App>> {
         let app = Arc::new(Mutex::new(App::default()));
         app.lock().await.items.push(crate::app::Item {
             url: "https://www.youtube.com/watch?v=jNQXAC9IVRw".into(),
             title: "…".into(),
             site: crate::sites::Site::YouTube,
-            kind: crate::app::Kind::Video,
+            kind,
             phase: crate::app::Phase::Queued,
             info: Default::default(),
             progress: Default::default(),
             error: None,
+            saved: None,
         });
         let (yt, ff) = ensure_binaries(&app).await.unwrap();
         // Arquivo de uma rodada anterior faz o yt-dlp pular o download (e o progresso).
-        let _ = std::fs::remove_file(crate::downloader::downloads_dir().join("Me at the zoo.mp4"));
+        for ext in ["mp4", "gif"] {
+            let old = crate::downloader::downloads_dir().join(format!("Me at the zoo.{ext}"));
+            let _ = std::fs::remove_file(old);
+        }
         crate::downloader::download(&app, 0, &yt, &ff)
             .await
             .unwrap();
+        app
+    }
+
+    #[tokio::test]
+    #[ignore = "download real de rede; rodar com `cargo test --ignored`"]
+    async fn real_gif_conversion_with_spaces_in_title() {
+        let app = real_zoo_download(crate::app::Kind::Gif).await;
         let a = app.lock().await;
+        // Antes o caminho com espaço se perdia e todo GIF caía em "gif falhou".
+        assert_eq!(a.items[0].error, None);
+        let saved = a.items[0].saved.clone().expect("caminho salvo");
+        assert_eq!(saved.extension().unwrap(), "gif");
+        assert!(saved.is_file(), "{saved:?}");
+        assert!(!saved.with_extension("mp4").exists(), "mp4 deveria sair");
+    }
+
+    #[tokio::test]
+    #[ignore = "download real de rede; rodar com `cargo test --ignored`"]
+    async fn real_youtube_download_end_to_end() {
+        let app = real_zoo_download(crate::app::Kind::Video).await;
+        let a = app.lock().await;
+        let saved = a.items[0].saved.clone().expect("caminho salvo");
+        assert!(saved.is_file(), "{saved:?}");
         assert_eq!(
             a.items[0].phase,
             crate::app::Phase::Done,

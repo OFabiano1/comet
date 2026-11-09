@@ -73,6 +73,22 @@ async fn run_queue(app: Arc<Mutex<App>>) {
     a.busy = false;
 }
 
+/// Com arquivo: abre a pasta já com ele selecionado. Sem: só abre Downloads\Comet.
+fn open_in_explorer(file: Option<&std::path::Path>) {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = std::process::Command::new("explorer");
+    match file {
+        // explorer não aceita o /select com aspas no lugar que o Rust põe: vai cru.
+        Some(f) => cmd.raw_arg(format!("/select,\"{}\"", f.display())),
+        None => {
+            let dir = downloader::downloads_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            cmd.arg(dir)
+        }
+    };
+    let _ = cmd.spawn();
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut terminal = Terminal::new()?;
@@ -111,9 +127,8 @@ async fn main() -> Result<()> {
                     }
                     KeyCode::Char('g') | KeyCode::Char('G') if a.input.is_empty() => a.toggle_gif(),
                     KeyCode::Char('o') | KeyCode::Char('O') if a.input.is_empty() => {
-                        let dir = downloader::downloads_dir();
-                        let _ = std::fs::create_dir_all(&dir);
-                        let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                        let file = a.items.get(a.selected).and_then(|i| i.saved.clone());
+                        open_in_explorer(file.as_deref().filter(|f| f.is_file()));
                     }
                     KeyCode::Char('q') | KeyCode::Char('Q') if a.input.is_empty() && !a.busy => {
                         a.should_quit = true
