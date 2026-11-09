@@ -10,6 +10,8 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 pub const CONTENT_MAX_WIDTH: u16 = 64;
+/// Mesmo convite do site (AxolotlBR/src/data/site.ts).
+const DISCORD_INVITE: &str = "discord.gg/AxolotlBR";
 
 pub fn truncate_ellipsis(s: &str, max: usize) -> String {
     if max == 0 {
@@ -108,8 +110,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     let item_h = 3u16;
     let empty_h = 2u16;
 
-    // Altura fixa: respiro + logo(3) + rótulo + input(3) + dica + fila(2) + rodapé.
-    let fixed = spacer + 3 + spacer + 1 + 3 + 1 + spacer + 2 + spacer + 1;
+    // Altura fixa: respiro + cabeçalho(4) + rótulo + input(3) + dica + fila(2) + rodapé.
+    let header_h = 4u16;
+    let fixed = spacer + header_h + spacer + 1 + 3 + 1 + spacer + 2 + spacer + 1;
     let space_for_body = area.height.saturating_sub(fixed);
     let visible = if app.items.is_empty() {
         0
@@ -126,7 +129,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let block = centered_rect(area, fixed + body_h);
     let chunks = ratatui::layout::Layout::vertical([
         ratatui::layout::Constraint::Length(spacer),
-        ratatui::layout::Constraint::Length(3),
+        ratatui::layout::Constraint::Length(header_h),
         ratatui::layout::Constraint::Length(spacer),
         ratatui::layout::Constraint::Length(1),
         ratatui::layout::Constraint::Length(3),
@@ -139,13 +142,14 @@ pub fn draw(f: &mut Frame, app: &App) {
     ])
     .split(block);
 
-    // Logo, versão e status — centralizados.
+    // Logo, convite do Discord, versão e status — centralizados.
     f.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled(
                 "☄ COMET",
                 fg(PRIMARY).add_modifier(Modifier::BOLD),
             )),
+            Line::from(Span::styled(DISCORD_INVITE, fg(TEXT_SECONDARY))),
             Line::from(Span::styled(
                 format!("baixador de vídeo · v{}", env!("CARGO_PKG_VERSION")),
                 fg(TEXT_MUTED),
@@ -378,6 +382,7 @@ mod tests {
         let app = App::default();
         let text = render(&app, 80, 24);
         assert!(text.contains("☄ COMET"));
+        assert!(text.contains("discord.gg/AxolotlBR"));
         assert!(text.contains("baixador de vídeo · v"));
         assert!(text.contains("cola o link aqui (ctrl+v)"));
         assert!(text.contains("youtube · twitter/x · tiktok"));
@@ -424,6 +429,17 @@ mod tests {
             };
             assert!(render(&app, 80, 24).contains(expected), "faltou {expected}");
         }
+    }
+
+    #[test]
+    fn discord_invite_sits_right_under_the_logo() {
+        let grid = render_grid(&App::default(), 80, 24);
+        let row_of = |needle: &str| {
+            grid.iter()
+                .position(|row| row.concat().contains(needle))
+                .unwrap()
+        };
+        assert_eq!(row_of("discord.gg/AxolotlBR"), row_of("☄") + 1);
     }
 
     #[test]
