@@ -1,4 +1,4 @@
-# 🫟 Comet
+# ☄ Comet video downloader
 
 Sua comunidade na internet, de player pra player — e seu downloader de confiança.
 
