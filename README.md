@@ -59,7 +59,7 @@ Requer [Rust](https://rustup.rs).
 .\build.ps1
 ```
 
-Gera `dist\comet.exe` e `dist\comet-v1.0.0.zip`.
+Gera `dist\comet.exe` e `dist\comet-v<versão>.zip` (versão lida do `Cargo.toml`).
 
 ## Testes
 
