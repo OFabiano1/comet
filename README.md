@@ -10,7 +10,7 @@
 
 Baixador de vídeos no terminal. Cola a URL, aperta Enter, pronto.
 
-Sua comunidade na internet, de player pra player — e seu downloader de confiança.
+
 
 ## Suporta
 
