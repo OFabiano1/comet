@@ -1,78 +1,82 @@
-# ☄ Comet 
+# ☄ Comet
+
 ```
                           _        
   ___ ___  _ __ ___   ___| |_  _   
  / __/ _ \| '_ ` _ \ / _ \ __|| |_ 
 | (_| (_) | | | | | |  __/ ||_   _|               -  video downloader
  \___\___/|_| |_| |_|\___|\__||_|  
- ```
+```
+
+Baixador de vídeos no terminal. Cola a URL, aperta Enter, pronto.
 
 Sua comunidade na internet, de player pra player — e seu downloader de confiança.
 
-Comet baixa:
+## Suporta
 
-- **Vídeo** como `.mp4` (até 1080p) de **YouTube, TikTok, Instagram, X/Twitter, Twitch, Pinterest** e os demais ~1800 sites que o yt-dlp suporta.
-- **Áudio** como `.mp3` (192 kbps) das mesmas fontes.
-- **GIF por link** — URL direta (`media.tenor.com/.../algo.gif`) ou página do [Tenor](https://tenor.com) / [Giphy](https://giphy.com).
-
-Primeira execução sem `vendor/` (clone do GitHub, primeiro `.exe`): o Comet baixa `yt-dlp.exe` + `ffmpeg.exe` sozinho no primeiro download.
-
-Limitações: posts que exigem login (Instagram restringe bastante) falham com mensagem clara — o Comet não tem login por design. "GIFs" de Twitter/TikTok vêm como `.mp4` (o site entrega assim).
-
-## Como rodar
-
-Requisitos: Windows + Node.js.
-
-```powershell
-npm install
-powershell -ExecutionPolicy Bypass -File scripts\fetch-binaries.ps1
-npm start
-```
-
-Ou sem Node: rode o executável portátil em `dist\Comet-win32-x64\Comet.exe`. Gerar de novo:
-
-```powershell
-npm run package
-```
-
-Se o `.exe` reclamar de `yt-dlp`, rode `scripts\fetch-binaries.ps1` uma vez e execute `npm run package` de novo (os binários vão embutidos no pacote).
-
-`fetch-binaries.ps1` baixa `yt-dlp.exe` e `ffmpeg.exe` para `vendor/` (git-ignored — nunca commitados).
-
-## Atualizar yt-dlp
-
-YouTube muda toda hora; yt-dlp acompanha. Dentro do app use o botão **Atualizar yt-dlp** (roda `yt-dlp.exe -U`), ou rode o script `fetch-binaries.ps1` de novo (ele também atualiza o ffmpeg).
+- YouTube (`youtube.com/watch`, `youtu.be`)
+- Twitter/X — vídeo **e** GIF (`.gif` real via ffmpeg)
+- TikTok (`tiktok.com/@user/video/…`)
 
 ## Uso
 
-1. Cole o link.
-2. Clique no formato: `MP4`, `MP3` ou `GIF`.
-3. Veja o progresso; **Parar** cancela e apaga o parcial (`.part`).
+```
+comet.exe
+```
 
-Escolha **Pasta de destino** para trocar onde os arquivos caem (por padrão, `Downloads`). Arquivo existente nunca é sobrescrito: o Comet salva com sufixo numérico.
+Cole a URL (Ctrl+V) no campo e aperte **Enter**. Depois:
 
-## Estrutura
+| Tecla | Ação |
+|-------|------|
+| `Enter` | Adiciona URL à fila |
+| `D` | Baixa a fila |
+| `G` | Alterna GIF no item selecionado (Twitter) |
+| `O` | Abre a pasta de downloads |
+| `↑` / `↓` | Move a seleção |
+| `Q` / `Esc` | Sai |
+
+Teclas de comando só valem com o campo de URL vazio. Para digitar a URL à
+mão, cole com Ctrl+V.
+
+GIF do Twitter: selecione o item e aperte `G` antes de `D` — o vídeo vira
+`.gif` de verdade (paleta otimizada via ffmpeg), não só um mp4 renomeado.
+
+Twitter/X e TikTok pedem cookies: o Comet usa os cookies do Chrome, Edge ou
+Brave instalados na máquina (`--cookies-from-browser`). Sem isso, a
+plataforma bloqueia o download.
+
+Downloads vão para `%USERPROFILE%\Downloads\Comet\`.
+
+No primeiro uso, o Comet baixa `yt-dlp` e `ffmpeg` sozinhos para
+`%LOCALAPPDATA%\comet\bin` (mostra o progresso na tela). Se `vendor\`
+existir ao lado do exe, ele usa os binários de lá.
+
+## Build
+
+Requer [Rust](https://rustup.rs).
 
 ```
-main.js               Electron main (IPC, config, orquestração)
-preload.js            ponte segura renderer ↔ main
-renderer/             janela (HTML/CSS/JS puro, sem bundler)
-lib/                  lógica testável de node
-test/                 node --test (suite completa)
-scripts/              scripts de manutenção
-vendor/               binários baixados (git-ignored)
+.\build.ps1
 ```
+
+Gera `dist\comet.exe` e `dist\comet-v1.0.0.zip`.
 
 ## Testes
 
 ```
-node --test
+cargo test              # unitários
+cargo test -- --ignored # download real de rede (~90 MB de vendor)
 ```
+
+## Limitações
+
+Posts que exigem login falham com mensagem clara (`PRIVATE OR LOGIN
+REQUIRED`) — o Comet não tem login por design. GIF de Twitter/TikTok vem
+como `.mp4` do site; o `G` converte para `.gif` real.
 
 ## Licença
 
 MIT — de Axolotl BR, para a internet.
 
-Logo: o cometa é o Twemoji ☄ (`renderer/assets/comet.svg`), de
-[jdecked/twemoji](https://github.com/jdecked/twemoji) —
+Logo: o cometa é o Twemoji ☄ ([jdecked/twemoji](https://github.com/jdecked/twemoji)) —
 créditos: © Twitter, X e colaboradores, licença CC-BY 4.0.
