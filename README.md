@@ -1,10 +1,11 @@
 # ☄ Comet video downloader
-
+```
                           _        
   ___ ___  _ __ ___   ___| |_  _   
  / __/ _ \| '_ ` _ \ / _ \ __|| |_ 
 | (_| (_) | | | | | |  __/ ||_   _|
  \___\___/|_| |_| |_|\___|\__||_|  
+ ```
 
 Sua comunidade na internet, de player pra player — e seu downloader de confiança.
 
