@@ -1,5 +1,8 @@
 use crate::app::{App, Item, Kind, Phase};
-use crate::theme::{ACCENT, ACCENT_LIGHT, BG, SURFACE_ALT};
+use crate::theme::{
+    BACKGROUND, DANGER, PRIMARY, PRIMARY_HOVER, SUCCESS, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
+    WARNING,
+};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -37,8 +40,7 @@ pub fn tail_ellipsis(s: &str, max: usize) -> String {
 pub fn content_width(area_width: u16) -> u16 {
     area_width
         .saturating_sub(4)
-        .min(CONTENT_MAX_WIDTH)
-        .max(1)
+        .clamp(1, CONTENT_MAX_WIDTH)
         .min(area_width)
 }
 
@@ -53,23 +55,21 @@ pub fn centered_rect(area: Rect, height: u16) -> Rect {
     }
 }
 
-fn dim() -> Style {
-    Style::new().fg(SURFACE_ALT)
+fn fg(color: Color) -> Style {
+    Style::new().fg(color)
 }
 
-fn accent() -> Style {
-    Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
-}
-
+/// Estado nunca só por cor: todo chip leva texto, e os finais levam ✓ ! ✗.
 fn phase_chip(item: &Item) -> (String, Style) {
-    match item.phase {
-        Phase::Queued => ("QUEUED".to_string(), dim()),
-        Phase::Downloading => ("DOWNLOADING".to_string(), Style::new().fg(ACCENT_LIGHT)),
-        Phase::Converting => ("CONVERTING".to_string(), Style::new().fg(ACCENT_LIGHT)),
-        Phase::Done => ("DONE".to_string(), Style::new().fg(ACCENT_LIGHT)),
-        Phase::Failed => (
-            format!("FAILED: {}", item.error.clone().unwrap_or_default()),
-            Style::new().fg(Color::Red),
+    match (item.phase, &item.error) {
+        (Phase::Queued, _) => ("na fila".to_string(), fg(TEXT_MUTED)),
+        (Phase::Downloading, _) => ("baixando".to_string(), fg(PRIMARY_HOVER)),
+        (Phase::Converting, _) => ("convertendo pra gif".to_string(), fg(PRIMARY_HOVER)),
+        (Phase::Done, None) => ("✓ pronto".to_string(), fg(SUCCESS)),
+        (Phase::Done, Some(note)) => (format!("! {note}"), fg(WARNING)),
+        (Phase::Failed, err) => (
+            format!("✗ {}", err.as_deref().unwrap_or("o download falhou")),
+            fg(DANGER),
         ),
     }
 }
@@ -101,7 +101,7 @@ fn progress_text(item: &Item) -> String {
 
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
-    f.buffer_mut().set_style(area, Style::new().bg(BG));
+    f.buffer_mut().set_style(area, Style::new().bg(BACKGROUND));
 
     let compact = area.height < 16;
     let spacer = if compact { 0 } else { 1 };
@@ -142,43 +142,40 @@ pub fn draw(f: &mut Frame, app: &App) {
     // Logo, versão e status — centralizados.
     f.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled("☄ COMET", accent())),
             Line::from(Span::styled(
-                format!("VIDEO DOWNLOADER · v{}", env!("CARGO_PKG_VERSION")),
-                dim(),
+                "☄ COMET",
+                fg(PRIMARY).add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
-                app.status.clone(),
-                Style::new().fg(ACCENT_LIGHT),
+                format!("baixador de vídeo · v{}", env!("CARGO_PKG_VERSION")),
+                fg(TEXT_MUTED),
             )),
+            Line::from(Span::styled(app.status.clone(), fg(TEXT_SECONDARY))),
         ])
         .alignment(Alignment::Center),
         chunks[1],
     );
 
-    // Rótulo do campo.
+    // Rótulo do campo (overline).
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled("DOWNLOAD URL", dim()))),
+        Paragraph::new(Line::from(Span::styled("LINK", fg(TEXT_SECONDARY)))),
         chunks[3],
     );
 
-    // Campo de input com borda roxa sutil.
+    // O campo está sempre em foco: borda no anel de foco do Prism.
     let input_rect = chunks[4];
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::new().fg(ACCENT));
+        .border_style(fg(PRIMARY_HOVER));
     let inner = block.inner(input_rect);
     f.render_widget(block, input_rect);
     // 2 colunas reservadas: seta `↵` e cursor no fim do texto.
     let text_width = inner.width.saturating_sub(2) as usize;
     let (text, style) = if app.input.is_empty() {
-        (
-            "Paste your link here...".to_string(),
-            Style::new().fg(SURFACE_ALT),
-        )
+        ("cola o link aqui (ctrl+v)".to_string(), fg(TEXT_MUTED))
     } else {
-        (app.input.clone(), Style::new().fg(Color::White))
+        (app.input.clone(), fg(TEXT_PRIMARY))
     };
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -192,7 +189,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     );
     if inner.width > 1 {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled("↵", Style::new().fg(SURFACE_ALT))))
+            Paragraph::new(Line::from(Span::styled("↵", fg(TEXT_MUTED))))
                 .alignment(Alignment::Center),
             Rect {
                 x: inner.x + inner.width - 1,
@@ -211,36 +208,20 @@ pub fn draw(f: &mut Frame, app: &App) {
     }
 
     // Dica de plataformas ou detecção da URL.
-    let hint: Vec<Span> = match crate::sites::detect(&app.input) {
-        Some(site) => vec![
-            Span::styled(
-                format!("{} DETECTED", site.label().to_uppercase()),
-                Style::new().fg(ACCENT_LIGHT),
-            ),
-            Span::styled(" · ", dim()),
-            Span::styled("VALID URL", Style::new().fg(ACCENT_LIGHT)),
-        ],
+    let hint = match crate::sites::detect(&app.input) {
+        Some(site) => Span::styled(format!("✓ link do {}", site.label()), fg(SUCCESS)),
         None if app.input.trim().is_empty() => {
-            vec![Span::styled("YOUTUBE · TWITTER/X · TIKTOK", dim())]
+            Span::styled("youtube · twitter/x · tiktok", fg(TEXT_MUTED))
         }
-        None => vec![Span::styled("INVALID URL", Style::new().fg(Color::Red))],
+        None => Span::styled("✗ link não reconhecido", fg(DANGER)),
     };
     f.render_widget(Paragraph::new(Line::from(hint)), chunks[5]);
 
     // Cabeçalho da fila + contador.
-    let counter = if app.completed > 0 {
-        app.summary()
-    } else {
-        format!(
-            "{} ITEM{}",
-            app.items.len(),
-            if app.items.len() == 1 { "" } else { "S" }
-        )
-    };
     f.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled("DOWNLOAD QUEUE", dim())),
-            Line::from(Span::styled(format!("  {counter}"), dim())),
+            Line::from(Span::styled("FILA", fg(TEXT_SECONDARY))),
+            Line::from(Span::styled(app.summary(), fg(TEXT_MUTED))),
         ]),
         chunks[7],
     );
@@ -250,14 +231,8 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.items.is_empty() {
         f.render_widget(
             Paragraph::new(vec![
-                Line::from(Span::styled(
-                    "Nothing here yet",
-                    Style::new().fg(Color::Gray),
-                )),
-                Line::from(Span::styled(
-                    "Your downloads will appear here",
-                    dim(),
-                )),
+                Line::from(Span::styled("fila vazia", fg(TEXT_SECONDARY))),
+                Line::from(Span::styled("cola um link e aperta enter", fg(TEXT_MUTED))),
             ])
             .alignment(Alignment::Center),
             body,
@@ -266,13 +241,19 @@ pub fn draw(f: &mut Frame, app: &App) {
         let sel = app.selected.min(app.items.len().saturating_sub(1));
         let offset = sel.saturating_sub(visible.saturating_sub(1) as usize);
         let mut lines: Vec<Line> = Vec::new();
-        for (i, item) in app.items.iter().enumerate().skip(offset).take(visible as usize) {
+        for (i, item) in app
+            .items
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(visible as usize)
+        {
             let marker = if i == sel { "▎" } else { " " };
-            let title_style = if i == sel {
-                Style::new().fg(Color::White)
+            let title_style = fg(if i == sel {
+                TEXT_PRIMARY
             } else {
-                Style::new().fg(SURFACE_ALT)
-            };
+                TEXT_SECONDARY
+            });
             let (chip, chip_style) = phase_chip(item);
             let meta = format!("{} · {}", item.site.label(), ext_of(item));
             let right = if item.phase == Phase::Downloading {
@@ -287,12 +268,12 @@ pub fn draw(f: &mut Frame, app: &App) {
             // Progresso alinhado à direita da linha do título.
             let gap = avail.saturating_sub(title.chars().count() + right_len);
             lines.push(Line::from(vec![
-                Span::styled(marker, Style::new().fg(ACCENT)),
+                Span::styled(marker, fg(PRIMARY)),
                 Span::styled(title, title_style),
                 Span::styled(" ".repeat(gap), Style::default()),
-                Span::styled(right.clone(), Style::new().fg(ACCENT_LIGHT)),
+                Span::styled(right, fg(PRIMARY_HOVER)),
             ]));
-            lines.push(Line::from(Span::styled(format!(" {meta}"), dim())));
+            lines.push(Line::from(Span::styled(format!(" {meta}"), fg(TEXT_MUTED))));
             lines.push(Line::from(Span::styled(format!(" {chip}"), chip_style)));
         }
         f.render_widget(Paragraph::new(lines), body);
@@ -301,8 +282,8 @@ pub fn draw(f: &mut Frame, app: &App) {
     // Rodapé compacto.
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "ENTER Add · D Download · G GIF · Q Quit",
-            dim(),
+            "enter adiciona · d baixa · g gif · o pasta · q sai",
+            fg(TEXT_MUTED),
         )))
         .alignment(Alignment::Center),
         chunks[10],
@@ -338,7 +319,7 @@ mod tests {
         (0..h)
             .map(|y| {
                 (0..w)
-                    .map(|x| buf.get(x, y).symbol().to_string())
+                    .map(|x| buf[(x, y)].symbol().to_string())
                     .collect::<Vec<String>>()
             })
             .collect()
@@ -397,14 +378,52 @@ mod tests {
         let app = App::default();
         let text = render(&app, 80, 24);
         assert!(text.contains("☄ COMET"));
-        assert!(text.contains("VIDEO DOWNLOADER · v"));
-        assert!(text.contains("Paste your link here..."));
-        assert!(text.contains("YOUTUBE · TWITTER/X · TIKTOK"));
-        assert!(text.contains("DOWNLOAD QUEUE"));
-        assert!(text.contains("0 ITEMS"));
-        assert!(text.contains("Nothing here yet"));
-        assert!(text.contains("Your downloads will appear here"));
-        assert!(text.contains("ENTER Add"));
+        assert!(text.contains("baixador de vídeo · v"));
+        assert!(text.contains("cola o link aqui (ctrl+v)"));
+        assert!(text.contains("youtube · twitter/x · tiktok"));
+        assert!(text.contains("FILA"));
+        assert!(text.contains("0 itens"));
+        assert!(text.contains("fila vazia"));
+        assert!(text.contains("cola um link e aperta enter"));
+        assert!(text.contains("o pasta"));
+    }
+
+    fn item(phase: Phase, error: Option<&str>) -> Item {
+        Item {
+            url: "https://x.com/u/status/1".to_string(),
+            title: "video title goes here".to_string(),
+            site: Site::Twitter,
+            kind: Kind::Gif,
+            phase,
+            pct: 64.0,
+            size_str: "19.3 MB".to_string(),
+            got_str: "12.4 MB".to_string(),
+            error: error.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn final_states_carry_text_not_only_color() {
+        for (phase, error, expected) in [
+            (Phase::Done, None, "✓ pronto"),
+            (
+                Phase::Done,
+                Some("gif falhou, o mp4 ficou salvo"),
+                "! gif falhou, o mp4 ficou salvo",
+            ),
+            (
+                Phase::Failed,
+                Some("link não suportado"),
+                "✗ link não suportado",
+            ),
+            (Phase::Failed, None, "✗ o download falhou"),
+        ] {
+            let app = App {
+                items: vec![item(phase, error)],
+                ..App::default()
+            };
+            assert!(render(&app, 80, 24).contains(expected), "faltou {expected}");
+        }
     }
 
     #[test]
@@ -414,8 +433,7 @@ mod tests {
         // nenhuma coluna antes do conteúdo (logo começa após a margem)
         let logo_col = grid
             .iter()
-            .enumerate()
-            .find_map(|(_, row)| row.iter().position(|c| c.contains("☄")))
+            .find_map(|row| row.iter().position(|c| c.contains("☄")))
             .unwrap();
         assert!(logo_col >= 8, "logo em coluna {}", logo_col);
         // margem esquerda vazia em todas as linhas
@@ -428,29 +446,23 @@ mod tests {
 
     #[test]
     fn queue_item_shows_title_and_progress() {
-        let mut app = App::default();
-        app.input = "https://x.com/u/status/1".to_string();
-        app.items.push(Item {
-            url: "https://x.com/u/status/1".to_string(),
-            title: "video title goes here".to_string(),
-            site: Site::Twitter,
-            kind: Kind::Video,
-            phase: Phase::Downloading,
-            pct: 64.0,
-            size_str: "19.3 MB".to_string(),
-            got_str: "12.4 MB".to_string(),
-            error: None,
-        });
+        let app = App {
+            input: "https://x.com/u/status/1".to_string(),
+            items: vec![item(Phase::Downloading, None)],
+            ..App::default()
+        };
         let text = render(&app, 80, 24);
         assert!(text.contains("video title goes here"));
         assert!(text.contains("64%"));
-        assert!(text.contains("TWITTER DETECTED"));
+        assert!(text.contains("✓ link do twitter"));
     }
 
     #[test]
     fn tiny_terminal_does_not_panic() {
-        let mut app = App::default();
-        app.input = "https://x.com/u/status/1".to_string();
+        let app = App {
+            input: "https://x.com/u/status/1".to_string(),
+            ..App::default()
+        };
         render(&app, 20, 8);
         render(&app, 10, 4);
     }

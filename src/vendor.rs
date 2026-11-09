@@ -117,7 +117,7 @@ fn extract_exes(zip_path: &Path, dest_dir: &Path) -> Result<()> {
     }
     let _ = std::fs::remove_dir_all(&staging);
     if !found_ffmpeg && !dest_dir.join("ffmpeg.exe").is_file() {
-        anyhow::bail!("FFMPEG NÃO ENCONTRADO NO ZIP");
+        anyhow::bail!("o zip baixado não tem ffmpeg");
     }
     Ok(())
 }
@@ -128,7 +128,9 @@ pub fn install_ffmpeg_zip(zip_path: &Path, dest_dir: &Path) -> Result<()> {
 }
 
 pub async fn ensure_binaries(app: &Arc<Mutex<App>>) -> Result<(PathBuf, PathBuf)> {
-    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf));
     for dir in candidate_paths(exe_dir.as_deref()) {
         let ytdlp = dir.join("yt-dlp.exe");
         let ffmpeg = dir.join("ffmpeg.exe");
@@ -143,15 +145,15 @@ pub async fn ensure_binaries(app: &Arc<Mutex<App>>) -> Result<(PathBuf, PathBuf)
     let ffprobe = dir.join("ffprobe.exe");
 
     if !ytdlp.is_file() {
-        set_status(app, "BAIXANDO YT-DLP".to_string()).await;
-        fetch_to_file(app, YTDLP_URL, &ytdlp, "BAIXANDO YT-DLP").await?;
+        set_status(app, "baixando yt-dlp".to_string()).await;
+        fetch_to_file(app, YTDLP_URL, &ytdlp, "baixando yt-dlp").await?;
     }
     if !ffmpeg.is_file() {
         let zip_path = dir.join("ffmpeg.zip");
         let mut last_err = None;
         for url in FFMPEG_URLS {
-            set_status(app, "BAIXANDO FFMPEG".to_string()).await;
-            match fetch_to_file(app, url, &zip_path, "BAIXANDO FFMPEG").await {
+            set_status(app, "baixando ffmpeg".to_string()).await;
+            match fetch_to_file(app, url, &zip_path, "baixando ffmpeg").await {
                 Ok(()) => {
                     last_err = None;
                     break;
@@ -165,7 +167,7 @@ pub async fn ensure_binaries(app: &Arc<Mutex<App>>) -> Result<(PathBuf, PathBuf)
         if let Some(e) = last_err {
             return Err(e);
         }
-        set_status(app, "EXTRAINDO FFMPEG".to_string()).await;
+        set_status(app, "extraindo ffmpeg".to_string()).await;
         let z = zip_path.clone();
         let d = dir.clone();
         tokio::task::spawn_blocking(move || install_ffmpeg_zip(&z, &d))
@@ -174,7 +176,7 @@ pub async fn ensure_binaries(app: &Arc<Mutex<App>>) -> Result<(PathBuf, PathBuf)
         let _ = tokio::fs::remove_file(&zip_path).await;
     }
     if !ffprobe.is_file() {
-        anyhow::bail!("FFPROBE NÃO EXTRAÍDO");
+        anyhow::bail!("ffprobe não foi extraído");
     }
     Ok((ytdlp, ffmpeg))
 }
@@ -262,7 +264,9 @@ mod tests {
             error: None,
         });
         let (yt, ff) = ensure_binaries(&app).await.unwrap();
-        crate::downloader::download(&app, 0, &yt, &ff).await.unwrap();
+        crate::downloader::download(&app, 0, &yt, &ff)
+            .await
+            .unwrap();
         let a = app.lock().await;
         assert_eq!(
             a.items[0].phase,

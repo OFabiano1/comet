@@ -15,7 +15,8 @@ impl Site {
     }
 }
 
-pub fn detect(raw: &str) -> Option<Site> {    let url = raw.trim().to_ascii_lowercase();
+pub fn detect(raw: &str) -> Option<Site> {
+    let url = raw.trim().to_ascii_lowercase();
     let without_scheme = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
@@ -34,9 +35,7 @@ fn host_from(host: &str, path: &str) -> Option<Site> {
     match host {
         "youtube.com" | "youtu.be" | "m.youtube.com" => Some(Site::YouTube),
         "x.com" | "twitter.com" if path.contains("status/") => Some(Site::Twitter),
-        "tiktok.com" if path.contains("video/") || path.contains("photo/") => {
-            Some(Site::TikTok)
-        }
+        "tiktok.com" if path.contains("video/") || path.contains("photo/") => Some(Site::TikTok),
         "vm.tiktok.com" => Some(Site::TikTok),
         _ => None,
     }

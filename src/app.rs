@@ -38,11 +38,14 @@ pub struct App {
     pub should_quit: bool,
 }
 
+pub const STATUS_READY: &str = "pronto";
+pub const STATUS_BUSY: &str = "baixando a fila";
+
 impl Default for App {
     fn default() -> Self {
         Self {
             input: String::new(),
-            status: "READY".to_string(),
+            status: STATUS_READY.to_string(),
             items: Vec::new(),
             selected: 0,
             completed: 0,
@@ -56,10 +59,10 @@ impl App {
     pub fn add_url(&mut self) -> Result<(), String> {
         let raw = self.input.trim().to_string();
         let Some(site) = sites::detect(&raw) else {
-            return Err("INVALID URL".to_string());
+            return Err("link não reconhecido".to_string());
         };
         if self.items.iter().any(|i| i.url == raw) {
-            return Err("ALREADY IN QUEUE".to_string());
+            return Err("esse link já está na fila".to_string());
         }
         self.items.push(Item {
             url: raw,
@@ -78,23 +81,24 @@ impl App {
     }
 
     pub fn toggle_gif(&mut self) {
-        if let Some(item) = self.items.get_mut(self.selected) {
-            if item.phase == Phase::Queued {
-                item.kind = match item.kind {
-                    Kind::Video => Kind::Gif,
-                    Kind::Gif => Kind::Video,
-                };
-            }
+        let selected = self.items.get_mut(self.selected);
+        if let Some(item) = selected.filter(|i| i.phase == Phase::Queued) {
+            item.kind = match item.kind {
+                Kind::Video => Kind::Gif,
+                Kind::Gif => Kind::Video,
+            };
         }
     }
 
+    /// "2 itens · 1 baixado"; sem nada baixado, só a contagem.
     pub fn summary(&self) -> String {
-        format!(
-            "{} ITEM{} · {} COMPLETED",
-            self.items.len(),
-            if self.items.len() == 1 { "" } else { "S" },
-            self.completed
-        )
+        let n = self.items.len();
+        let itens = format!("{n} {}", if n == 1 { "item" } else { "itens" });
+        match self.completed {
+            0 => itens,
+            1 => format!("{itens} · 1 baixado"),
+            c => format!("{itens} · {c} baixados"),
+        }
     }
 }
 
@@ -106,10 +110,16 @@ mod tests {
         "https://www.youtube.com/watch?v=abc".to_string()
     }
 
+    fn app_with(input: &str) -> App {
+        App {
+            input: input.to_string(),
+            ..App::default()
+        }
+    }
+
     #[test]
     fn add_url_pushes_item_and_clears_input() {
-        let mut app = App::default();
-        app.input = yt_url();
+        let mut app = app_with(&yt_url());
         app.add_url().unwrap();
         assert_eq!(app.items.len(), 1);
         assert_eq!(app.items[0].site, Site::YouTube);
@@ -120,27 +130,24 @@ mod tests {
 
     #[test]
     fn add_url_invalid_keeps_input() {
-        let mut app = App::default();
-        app.input = "https://example.com".to_string();
-        assert_eq!(app.add_url(), Err("INVALID URL".to_string()));
+        let mut app = app_with("https://example.com");
+        assert_eq!(app.add_url(), Err("link não reconhecido".to_string()));
         assert_eq!(app.input, "https://example.com");
         assert!(app.items.is_empty());
     }
 
     #[test]
     fn add_url_rejects_duplicate() {
-        let mut app = App::default();
-        app.input = yt_url();
+        let mut app = app_with(&yt_url());
         app.add_url().unwrap();
         app.input = yt_url();
-        assert_eq!(app.add_url(), Err("ALREADY IN QUEUE".to_string()));
+        assert_eq!(app.add_url(), Err("esse link já está na fila".to_string()));
         assert_eq!(app.items.len(), 1);
     }
 
     #[test]
     fn toggle_gif_only_when_queued() {
-        let mut app = App::default();
-        app.input = yt_url();
+        let mut app = app_with(&yt_url());
         app.add_url().unwrap();
         app.toggle_gif();
         assert_eq!(app.items[0].kind, Kind::Gif);
@@ -151,16 +158,16 @@ mod tests {
 
     #[test]
     fn summary_plural_and_singular() {
-        let mut app = App::default();
-        app.input = yt_url();
+        let mut app = app_with(&yt_url());
+        assert_eq!(app.summary(), "0 itens");
         app.add_url().unwrap();
+        assert_eq!(app.summary(), "1 item");
         app.input = "https://x.com/u/status/1".to_string();
         app.add_url().unwrap();
         app.completed = 1;
-        assert_eq!(app.summary(), "2 ITEMS · 1 COMPLETED");
-        app.completed = 0;
-        app.items.pop();
-        assert_eq!(app.summary(), "1 ITEM · 0 COMPLETED");
+        assert_eq!(app.summary(), "2 itens · 1 baixado");
+        app.completed = 2;
+        assert_eq!(app.summary(), "2 itens · 2 baixados");
     }
 
     #[test]

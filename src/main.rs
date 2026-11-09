@@ -7,7 +7,7 @@ mod vendor;
 
 use anyhow::Result;
 use app::{App, Phase};
-use crossterm::event::{self, Event, EnableBracketedPaste, KeyCode, KeyEventKind};
+use crossterm::event::{self, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -69,7 +69,7 @@ async fn run_queue(app: Arc<Mutex<App>>) {
         }
     }
     let mut a = app.lock().await;
-    a.status = "READY".to_string();
+    a.status = app::STATUS_READY.to_string();
     a.busy = false;
 }
 
@@ -92,13 +92,20 @@ async fn main() -> Result<()> {
             }
             Event::Key(key) if key.kind == KeyEventKind::Press => {
                 let mut a = app.lock().await;
+                // AltGr chega como Ctrl+Alt e digita caractere de verdade; atalho é só um dos dois.
+                let chord = key.modifiers.contains(KeyModifiers::CONTROL)
+                    != key.modifiers.contains(KeyModifiers::ALT);
                 match key.code {
                     KeyCode::Esc => a.should_quit = true,
-                    KeyCode::Char('d') | KeyCode::Char('D')
-                        if a.input.is_empty() && !a.busy =>
-                    {
+                    // raw mode: Ctrl+C não manda sinal, chega como tecla.
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        a.should_quit = true
+                    }
+                    // Atalho com Ctrl/Alt (Ctrl+V sem bracketed paste) não vira letra no campo.
+                    KeyCode::Char(_) if chord => {}
+                    KeyCode::Char('d') | KeyCode::Char('D') if a.input.is_empty() && !a.busy => {
                         a.busy = true;
-                        a.status = "BUSY".to_string();
+                        a.status = app::STATUS_BUSY.to_string();
                         let handle = app.clone();
                         tokio::spawn(async move { run_queue(handle).await });
                     }
@@ -108,23 +115,21 @@ async fn main() -> Result<()> {
                         let _ = std::fs::create_dir_all(&dir);
                         let _ = std::process::Command::new("explorer").arg(&dir).spawn();
                     }
-                    KeyCode::Char('q') if a.input.is_empty() && !a.busy => a.should_quit = true,
+                    KeyCode::Char('q') | KeyCode::Char('Q') if a.input.is_empty() && !a.busy => {
+                        a.should_quit = true
+                    }
                     KeyCode::Char(c) => a.input.push(c),
                     KeyCode::Backspace => {
                         a.input.pop();
                     }
                     KeyCode::Enter => match a.add_url() {
-                        Ok(()) => a.status = "READY".to_string(),
+                        Ok(()) => a.status = app::STATUS_READY.to_string(),
                         Err(e) => a.status = e,
                     },
                     KeyCode::Up => {
                         a.selected = a.selected.saturating_sub(1);
                     }
-                    KeyCode::Down => {
-                        if a.selected + 1 < a.items.len() {
-                            a.selected += 1;
-                        }
-                    }
+                    KeyCode::Down if a.selected + 1 < a.items.len() => a.selected += 1,
                     _ => {}
                 }
             }

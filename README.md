@@ -33,7 +33,7 @@ Cole a URL (Ctrl+V) no campo e aperte **Enter**. Depois:
 | `G` | Alterna GIF no item selecionado (Twitter) |
 | `O` | Abre a pasta de downloads |
 | `↑` / `↓` | Move a seleção |
-| `Q` / `Esc` | Sai |
+| `Q` / `Esc` / `Ctrl+C` | Sai |
 
 Teclas de comando só valem com o campo de URL vazio. Para digitar a URL à
 mão, cole com Ctrl+V.
@@ -70,8 +70,8 @@ cargo test -- --ignored # download real de rede (~90 MB de vendor)
 
 ## Limitações
 
-Posts que exigem login falham com mensagem clara (`PRIVATE OR LOGIN
-REQUIRED`) — o Comet não tem login por design. GIF de Twitter/TikTok vem
+Posts que exigem login falham com a mensagem `vídeo privado ou pede login`.
+O Comet não tem login por design. GIF de Twitter/TikTok vem
 como `.mp4` do site; o `G` converte para `.gif` real.
 
 ## Licença

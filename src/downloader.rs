@@ -72,9 +72,16 @@ impl Drop for BusyGuard {
     }
 }
 
-pub fn parse_progress(line: &str) -> Option<Progress> {    let rest = line.strip_prefix("[PROG]")?.trim();
+pub fn parse_progress(line: &str) -> Option<Progress> {
+    let rest = line.strip_prefix("[PROG]")?.trim();
     let mut parts = rest.split('|');
-    let pct: f64 = parts.next()?.trim().trim_end_matches('%').trim().parse().ok()?;
+    let pct: f64 = parts
+        .next()?
+        .trim()
+        .trim_end_matches('%')
+        .trim()
+        .parse()
+        .ok()?;
     let size_str = parts.next()?.trim().to_string();
     let got_str = parts.next()?.trim().to_string();
     Some(Progress {
@@ -84,17 +91,35 @@ pub fn parse_progress(line: &str) -> Option<Progress> {    let rest = line.strip
     })
 }
 
+pub const GIF_FAILED: &str = "gif falhou, o mp4 ficou salvo";
+
 pub fn parse_error(stderr: &str) -> String {
     let lower = stderr.to_ascii_lowercase();
-    if lower.contains("private") || lower.contains("sign in") || lower.contains("login")
-        || lower.contains("age") || lower.contains("members-only") || lower.contains("authenticate")
-    {
-        "PRIVATE OR LOGIN REQUIRED".to_string()
+    // "age" solto casaria com "webpage", "image", "message".
+    let login_wall = [
+        "private",
+        "sign in",
+        "login",
+        "confirm your age",
+        "age-restricted",
+        "age restricted",
+        "members-only",
+        "authenticate",
+    ];
+    if login_wall.iter().any(|k| lower.contains(k)) {
+        "vídeo privado ou pede login".to_string()
     } else if lower.contains("unsupported url") {
-        "UNSUPPORTED URL".to_string()
+        "link não suportado".to_string()
     } else {
-        let first = stderr.lines().next().unwrap_or("DOWNLOAD FAILED");
-        truncate_msg(first)
+        // A linha do ERROR diz o motivo; WARNING antes dela é ruído.
+        let reason = stderr
+            .lines()
+            .find_map(|l| l.split_once("ERROR:").map(|(_, r)| r))
+            .or_else(|| stderr.lines().rev().find(|l| !l.trim().is_empty()));
+        match reason {
+            Some(r) => truncate_msg(r),
+            None => "o download falhou".to_string(),
+        }
     }
 }
 
@@ -125,11 +150,22 @@ pub fn extract_final_path(line: &str) -> Option<String> {
 
 pub fn downloads_dir() -> PathBuf {
     dirs::download_dir()
-        .unwrap_or_else(|| std::env::current_exe().unwrap().parent().unwrap().to_path_buf())
+        .unwrap_or_else(|| {
+            std::env::current_exe()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_path_buf()
+        })
         .join("Comet")
 }
 
-pub async fn download(app: &Arc<Mutex<App>>, idx: usize, ytdlp: &Path, _ffmpeg: &Path) -> Result<()> {
+pub async fn download(
+    app: &Arc<Mutex<App>>,
+    idx: usize,
+    ytdlp: &Path,
+    _ffmpeg: &Path,
+) -> Result<()> {
     let (url, out_dir) = {
         let mut a = app.lock().await;
         let item = &mut a.items[idx];
@@ -161,6 +197,8 @@ pub async fn download(app: &Arc<Mutex<App>>, idx: usize, ytdlp: &Path, _ffmpeg: 
         .current_dir(&out_dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        // Esc no meio do download não deixa yt-dlp órfão rodando.
+        .kill_on_drop(true)
         .spawn()?;
 
     let stdout = child.stdout.take().expect("stdout piped");
@@ -236,7 +274,7 @@ pub async fn download(app: &Arc<Mutex<App>>, idx: usize, ytdlp: &Path, _ffmpeg: 
         } else {
             let mut a = app.lock().await;
             a.items[idx].phase = Phase::Done;
-            a.items[idx].error = Some("GIF CONVERSION FAILED · MP4 KEPT".to_string());
+            a.items[idx].error = Some(GIF_FAILED.to_string());
         }
     } else if ok {
         app.lock().await.items[idx].phase = Phase::Done;
@@ -299,7 +337,7 @@ pub async fn to_gif(app: &Arc<Mutex<App>>, idx: usize, ffmpeg: &Path, mp4: &Path
         Ok(()) => item.phase = Phase::Done,
         Err(_) => {
             item.phase = Phase::Done;
-            item.error = Some("GIF CONVERSION FAILED · MP4 KEPT".to_string());
+            item.error = Some(GIF_FAILED.to_string());
         }
     }
     Ok(())
@@ -325,16 +363,29 @@ mod tests {
     fn maps_login_wall_and_private_errors() {
         assert_eq!(
             parse_error("ERROR: This video is private. [youtube]"),
-            "PRIVATE OR LOGIN REQUIRED"
+            "vídeo privado ou pede login"
         );
         assert_eq!(
             parse_error("ERROR: Sign in to confirm your age"),
-            "PRIVATE OR LOGIN REQUIRED"
+            "vídeo privado ou pede login"
         );
         assert_eq!(
             parse_error("ERROR: Unsupported URL: https://example.com"),
-            "UNSUPPORTED URL"
+            "link não suportado"
         );
+    }
+
+    #[test]
+    fn generic_error_uses_the_error_line_not_a_word_inside_it() {
+        // "webpage" contém "age": antes virava "privado ou pede login".
+        let stderr =
+            "WARNING: [youtube] falling back\nERROR: Unable to download webpage: HTTP Error 404";
+        assert_eq!(
+            parse_error(stderr),
+            "Unable to download webpage: HTTP Error 404"
+        );
+        assert_eq!(parse_error("algo estranho\n"), "algo estranho");
+        assert_eq!(parse_error(""), "o download falhou");
     }
 
     #[test]
@@ -421,7 +472,7 @@ mod tests {
 
     #[tokio::test]
     async fn to_gif_converts_and_keeps_nothing() {
-        let ffmpeg = Path::new("C:\\AxolotlBR\\#Projetos\\comet\\vendor\\ffmpeg.exe");
+        let ffmpeg = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/vendor/ffmpeg.exe"));
         if !ffmpeg.is_file() {
             return; // vendor ausente: teste real coberto no bloco de rede
         }
@@ -430,7 +481,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mp4 = dir.join("src.mp4");
         let status = std::process::Command::new(ffmpeg)
-            .args(["-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=128x128", mp4.to_str().unwrap()])
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=1:size=128x128",
+                mp4.to_str().unwrap(),
+            ])
             .status()
             .unwrap();
         assert!(status.success());
