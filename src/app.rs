@@ -22,10 +22,38 @@ pub struct Item {
     pub site: Site,
     pub kind: Kind,
     pub phase: Phase,
-    pub pct: f64,
-    pub size_str: String,
-    pub got_str: String,
+    pub info: VideoInfo,
+    pub progress: Progress,
     pub error: Option<String>,
+}
+
+/// Dados do vídeo que o yt-dlp devolve antes de baixar.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct VideoInfo {
+    pub channel: String,
+    pub duration_secs: Option<u64>,
+}
+
+/// Estado do download da parte atual (vídeo e áudio baixam separados).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Progress {
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    /// bytes por segundo
+    pub speed: Option<f64>,
+    pub eta_secs: Option<u64>,
+    pub audio: bool,
+}
+
+impl Progress {
+    pub fn pct(&self) -> Option<f64> {
+        let total = self.total.filter(|t| *t > 0)?;
+        Some((self.downloaded as f64 / total as f64 * 100.0).min(100.0))
+    }
+
+    pub fn remaining(&self) -> Option<u64> {
+        self.total.map(|t| t.saturating_sub(self.downloaded))
+    }
 }
 
 pub struct App {
@@ -70,9 +98,8 @@ impl App {
             site,
             kind: Kind::Video,
             phase: Phase::Queued,
-            pct: 0.0,
-            size_str: String::new(),
-            got_str: String::new(),
+            info: VideoInfo::default(),
+            progress: Progress::default(),
             error: None,
         });
         self.selected = self.items.len() - 1;

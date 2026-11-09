@@ -1,4 +1,4 @@
-use crate::app::{App, Item, Kind, Phase};
+use crate::app::{App, Item, Kind, Phase, Progress};
 use crate::theme::{
     BACKGROUND, DANGER, PRIMARY, PRIMARY_HOVER, SUCCESS, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
     WARNING,
@@ -83,22 +83,88 @@ fn ext_of(item: &Item) -> &'static str {
     }
 }
 
-/// 64% · 12.4 MB / 19.3 MB — linha à direita do título durante o download.
-fn progress_text(item: &Item) -> String {
-    format!(
-        "{:>3.0}% · {} / {}",
-        item.pct,
-        if item.got_str.is_empty() {
-            "0 B".to_string()
-        } else {
-            item.got_str.clone()
-        },
-        if item.size_str.is_empty() {
-            "…".to_string()
-        } else {
-            item.size_str.clone()
-        }
-    )
+/// 850 KB · 6.9 MB · 1.2 GB (base 1000, como o explorador do Windows mostra pra leigo).
+pub fn human_bytes(b: u64) -> String {
+    let b = b as f64;
+    if b < 1e6 {
+        format!("{:.0} KB", (b / 1e3).max(1.0))
+    } else if b < 1e9 {
+        format!("{:.1} MB", b / 1e6)
+    } else {
+        format!("{:.1} GB", b / 1e9)
+    }
+}
+
+/// ~12s · ~3min · ~1h05
+pub fn human_eta(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("~{secs}s"),
+        60..=3599 => format!("~{}min", secs.div_ceil(60)),
+        _ => format!("~{}h{:02}", secs / 3600, (secs % 3600) / 60),
+    }
+}
+
+/// 0:19 · 3:45 · 1:02:03
+pub fn human_duration(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// À direita do título: "faltam 6.9 MB · ~12s", ou só o baixado se o total não veio.
+fn remaining_text(p: &Progress) -> String {
+    let Some(left) = p.remaining() else {
+        return format!("{} baixados", human_bytes(p.downloaded));
+    };
+    match p.eta_secs {
+        Some(eta) => format!("faltam {} · {}", human_bytes(left), human_eta(eta)),
+        None => format!("faltam {}", human_bytes(left)),
+    }
+}
+
+/// "youtube · mp4 · jawed · 0:19" — canal e duração entram quando o yt-dlp manda.
+fn meta_text(item: &Item) -> String {
+    let mut parts = vec![item.site.label().to_string(), ext_of(item).to_string()];
+    if !item.info.channel.is_empty() {
+        parts.push(item.info.channel.clone());
+    }
+    if let Some(d) = item.info.duration_secs {
+        parts.push(human_duration(d));
+    }
+    parts.join(" · ")
+}
+
+/// "baixando vídeo ███████░░░░ 64% · 2.1 MB/s", cabendo em `width` colunas.
+fn progress_line(p: &Progress, width: usize) -> Line<'static> {
+    let label = if p.audio {
+        "baixando áudio "
+    } else {
+        "baixando vídeo "
+    };
+    let mut tail = match p.pct() {
+        Some(pct) => format!(" {pct:.0}%"),
+        None => " …".to_string(),
+    };
+    if let Some(speed) = p.speed {
+        tail.push_str(&format!(" · {}/s", human_bytes(speed as u64)));
+    }
+    let bar_w = width.saturating_sub(label.chars().count() + tail.chars().count());
+    // Barra curta demais não informa nada: some e deixa só o número.
+    let (filled, empty) = if bar_w < 4 {
+        (0, 0)
+    } else {
+        let done = (p.pct().unwrap_or(0.0) / 100.0 * bar_w as f64).round() as usize;
+        (done.min(bar_w), bar_w - done.min(bar_w))
+    };
+    Line::from(vec![
+        Span::styled(label, fg(PRIMARY_HOVER)),
+        Span::styled("█".repeat(filled), fg(PRIMARY_HOVER)),
+        Span::styled("░".repeat(empty), fg(TEXT_MUTED)),
+        Span::styled(tail, fg(TEXT_SECONDARY)),
+    ])
 }
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -258,10 +324,9 @@ pub fn draw(f: &mut Frame, app: &App) {
             } else {
                 TEXT_SECONDARY
             });
-            let (chip, chip_style) = phase_chip(item);
-            let meta = format!("{} · {}", item.site.label(), ext_of(item));
-            let right = if item.phase == Phase::Downloading {
-                progress_text(item)
+            let downloading = item.phase == Phase::Downloading;
+            let right = if downloading {
+                remaining_text(&item.progress)
             } else {
                 String::new()
             };
@@ -275,10 +340,20 @@ pub fn draw(f: &mut Frame, app: &App) {
                 Span::styled(marker, fg(PRIMARY)),
                 Span::styled(title, title_style),
                 Span::styled(" ".repeat(gap), Style::default()),
-                Span::styled(right, fg(PRIMARY_HOVER)),
+                Span::styled(right, fg(TEXT_SECONDARY)),
             ]));
-            lines.push(Line::from(Span::styled(format!(" {meta}"), fg(TEXT_MUTED))));
-            lines.push(Line::from(Span::styled(format!(" {chip}"), chip_style)));
+            lines.push(Line::from(Span::styled(
+                format!(" {}", meta_text(item)),
+                fg(TEXT_MUTED),
+            )));
+            if downloading {
+                let mut bar = progress_line(&item.progress, avail);
+                bar.spans.insert(0, Span::raw(" "));
+                lines.push(bar);
+            } else {
+                let (chip, chip_style) = phase_chip(item);
+                lines.push(Line::from(Span::styled(format!(" {chip}"), chip_style)));
+            }
         }
         f.render_widget(Paragraph::new(lines), body);
     }
@@ -297,7 +372,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{App, Kind, Phase};
+    use crate::app::{App, Kind, Phase, VideoInfo};
     use crate::sites::Site;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -400,9 +475,17 @@ mod tests {
             site: Site::Twitter,
             kind: Kind::Gif,
             phase,
-            pct: 64.0,
-            size_str: "19.3 MB".to_string(),
-            got_str: "12.4 MB".to_string(),
+            info: VideoInfo {
+                channel: "jawed".to_string(),
+                duration_secs: Some(19),
+            },
+            progress: Progress {
+                downloaded: 12_400_000,
+                total: Some(19_300_000),
+                speed: Some(2_100_000.0),
+                eta_secs: Some(3),
+                audio: false,
+            },
             error: error.map(str::to_string),
         }
     }
@@ -469,8 +552,47 @@ mod tests {
         };
         let text = render(&app, 80, 24);
         assert!(text.contains("video title goes here"));
-        assert!(text.contains("64%"));
+        assert!(text.contains("faltam 6.9 MB · ~3s"));
+        assert!(text.contains("twitter · gif · jawed · 0:19"));
+        assert!(text.contains("baixando vídeo █"));
+        assert!(text.contains("░ 64% · 2.1 MB/s"));
         assert!(text.contains("✓ link do twitter"));
+    }
+
+    #[test]
+    fn human_formats() {
+        assert_eq!(human_bytes(0), "1 KB");
+        assert_eq!(human_bytes(850_000), "850 KB");
+        assert_eq!(human_bytes(6_900_000), "6.9 MB");
+        assert_eq!(human_bytes(1_200_000_000), "1.2 GB");
+        assert_eq!(human_eta(12), "~12s");
+        assert_eq!(human_eta(61), "~2min");
+        assert_eq!(human_eta(3900), "~1h05");
+        assert_eq!(human_duration(19), "0:19");
+        assert_eq!(human_duration(225), "3:45");
+        assert_eq!(human_duration(3723), "1:02:03");
+    }
+
+    fn line_text(line: &Line) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn progress_line_fits_width_and_handles_unknown_total() {
+        let p = item(Phase::Downloading, None).progress;
+        assert_eq!(line_text(&progress_line(&p, 63)).chars().count(), 63);
+        // Sem espaço pra barra: fica só rótulo e número (o resto o terminal corta).
+        assert_eq!(
+            line_text(&progress_line(&p, 10)),
+            "baixando vídeo  64% · 2.1 MB/s"
+        );
+        let unknown = Progress {
+            downloaded: 500_000,
+            audio: true,
+            ..Progress::default()
+        };
+        assert_eq!(line_text(&progress_line(&unknown, 10)), "baixando áudio  …");
+        assert_eq!(remaining_text(&unknown), "500 KB baixados");
     }
 
     #[test]

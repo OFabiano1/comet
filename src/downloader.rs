@@ -1,19 +1,38 @@
-use crate::app::{App, Kind, Phase};
+use crate::app::{App, Kind, Phase, Progress, VideoInfo};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub struct Progress {
-    pub pct: f64,
-    pub size_str: String,
-    pub got_str: String,
-}
+/// Números crus: o Comet calcula %, quanto falta e formata do jeito dele.
+const PROGRESS_TEMPLATE: &str = "download:[PROG]%(progress.downloaded_bytes)s|%(progress.total_bytes,progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(info.vcodec)s";
 
 pub fn parse_title(line: &str) -> Option<String> {
     line.strip_prefix("TITLE:")
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
+}
+
+/// yt-dlp escreve "NA" quando não sabe o valor.
+fn known(field: &str) -> Option<&str> {
+    let f = field.trim();
+    (!f.is_empty() && f != "NA" && f != "None").then_some(f)
+}
+
+fn number(field: &str) -> Option<f64> {
+    known(field)?
+        .parse::<f64>()
+        .ok()
+        .filter(|n| n.is_finite() && *n >= 0.0)
+}
+
+/// `INFO:canal|segundos`
+pub fn parse_info(line: &str) -> Option<VideoInfo> {
+    let (channel, duration) = line.strip_prefix("INFO:")?.split_once('|')?;
+    Some(VideoInfo {
+        channel: known(channel).unwrap_or_default().to_string(),
+        duration_secs: number(duration).map(|d| d.round() as u64),
+    })
 }
 
 /// yt-dlp precisa de cookies do navegador para Twitter/X e TikTok em 2026.
@@ -72,22 +91,21 @@ impl Drop for BusyGuard {
     }
 }
 
+/// `[PROG]baixado|total|velocidade|eta|vcodec` (ver PROGRESS_TEMPLATE).
 pub fn parse_progress(line: &str) -> Option<Progress> {
-    let rest = line.strip_prefix("[PROG]")?.trim();
-    let mut parts = rest.split('|');
-    let pct: f64 = parts
-        .next()?
-        .trim()
-        .trim_end_matches('%')
-        .trim()
-        .parse()
-        .ok()?;
-    let size_str = parts.next()?.trim().to_string();
-    let got_str = parts.next()?.trim().to_string();
+    let mut parts = line.strip_prefix("[PROG]")?.split('|');
+    let downloaded = number(parts.next()?)? as u64;
+    let total = parts.next().and_then(number).map(|t| t as u64);
+    let speed = parts.next().and_then(number);
+    let eta_secs = parts.next().and_then(number).map(|e| e as u64);
+    // Parte só de áudio vem com vcodec "none".
+    let audio = parts.next().map(str::trim) == Some("none");
     Some(Progress {
-        pct,
-        size_str,
-        got_str,
+        downloaded,
+        total,
+        speed,
+        eta_secs,
+        audio,
     })
 }
 
@@ -170,22 +188,26 @@ pub async fn download(
         let mut a = app.lock().await;
         let item = &mut a.items[idx];
         item.phase = Phase::Downloading;
-        item.pct = 0.0;
+        item.progress = Progress::default();
         (item.url.clone(), downloads_dir())
     };
     tokio::fs::create_dir_all(&out_dir).await?;
 
     let mut args: Vec<String> = vec![
+        // --print liga o modo silencioso, que esconde o progresso; --progress traz de volta.
+        "--progress".to_string(),
         "--newline".to_string(),
         "--no-playlist".to_string(),
         "--merge-output-format".to_string(),
         "mp4".to_string(),
         "--progress-template".to_string(),
-        "download:[PROG]%(progress._percent_str)s|%(progress._total_bytes_estimate_str)s|%(progress._downloaded_bytes_str)s".to_string(),
+        PROGRESS_TEMPLATE.to_string(),
         "--print".to_string(),
         "after_move:filepath".to_string(),
         "--print".to_string(),
         "TITLE:%(title)s".to_string(),
+        "--print".to_string(),
+        "INFO:%(uploader,channel)s|%(duration)s".to_string(),
         "-o".to_string(),
         "%(title).80B.%(ext)s".to_string(),
     ];
@@ -216,14 +238,11 @@ pub async fn download(
                 Ok(_) => {
                     let l = line.trim_end();
                     if let Some(p) = parse_progress(l) {
-                        let mut a = app2.lock().await;
-                        let item = &mut a.items[idx];
-                        item.pct = p.pct;
-                        item.size_str = p.size_str;
-                        item.got_str = p.got_str;
+                        app2.lock().await.items[idx].progress = p;
                     } else if let Some(title) = parse_title(l) {
-                        let mut a = app2.lock().await;
-                        a.items[idx].title = title;
+                        app2.lock().await.items[idx].title = title;
+                    } else if let Some(info) = parse_info(l) {
+                        app2.lock().await.items[idx].info = info;
                     } else if let Some(path) = extract_final_path(l) {
                         final_path = Some(path);
                     }
@@ -349,14 +368,39 @@ mod tests {
 
     #[test]
     fn parses_progress_template_lines() {
-        let p = parse_progress("[PROG]  42.3%|19.30MiB|8.16MiB").unwrap();
-        assert_eq!(p.pct, 42.3);
-        assert_eq!(p.size_str, "19.30MiB");
-        assert_eq!(p.got_str, "8.16MiB");
-        let p = parse_progress("[PROG] 100.0%|2.00MiB|2.00MiB").unwrap();
-        assert_eq!(p.pct, 100.0);
+        // Linhas reais do yt-dlp (vídeo av01 e depois a parte de áudio).
+        let p = parse_progress("[PROG]3072|223779|1948420.064721004|0|av01.0.00M.08").unwrap();
+        assert_eq!(p.downloaded, 3072);
+        assert_eq!(p.total, Some(223779));
+        assert_eq!(p.speed, Some(1948420.064721004));
+        assert_eq!(p.eta_secs, Some(0));
+        assert!(!p.audio);
+        assert!((p.pct().unwrap() - 1.37).abs() < 0.01);
+        assert_eq!(p.remaining(), Some(220707));
+
+        let p = parse_progress("[PROG]1024|NA|NA|NA|none").unwrap();
+        assert_eq!(p.total, None);
+        assert_eq!(p.pct(), None);
+        assert!(p.audio);
+
+        assert!(parse_progress("[PROG]NA|NA|NA|NA|NA").is_none());
         assert!(parse_progress("garbage").is_none());
         assert!(parse_progress("[download] Destination: x.mp4").is_none());
+    }
+
+    #[test]
+    fn parses_info_line() {
+        assert_eq!(
+            parse_info("INFO:jawed|19"),
+            Some(VideoInfo {
+                channel: "jawed".into(),
+                duration_secs: Some(19)
+            })
+        );
+        // Canal com barra não pode virar caminho de arquivo.
+        assert_eq!(parse_info("INFO:AC/DC|NA").unwrap().channel, "AC/DC");
+        assert_eq!(parse_info("INFO:NA|12.5").unwrap().channel, "");
+        assert_eq!(parse_info("TITLE:x"), None);
     }
 
     #[test]
@@ -500,9 +544,8 @@ mod tests {
             site: crate::sites::Site::Twitter,
             kind: Kind::Gif,
             phase: Phase::Converting,
-            pct: 100.0,
-            size_str: String::new(),
-            got_str: String::new(),
+            info: VideoInfo::default(),
+            progress: Progress::default(),
             error: None,
         });
         to_gif(&app, 0, ffmpeg, &mp4).await.unwrap();

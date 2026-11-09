@@ -258,12 +258,13 @@ mod tests {
             site: crate::sites::Site::YouTube,
             kind: crate::app::Kind::Video,
             phase: crate::app::Phase::Queued,
-            pct: 0.0,
-            size_str: String::new(),
-            got_str: String::new(),
+            info: Default::default(),
+            progress: Default::default(),
             error: None,
         });
         let (yt, ff) = ensure_binaries(&app).await.unwrap();
+        // Arquivo de uma rodada anterior faz o yt-dlp pular o download (e o progresso).
+        let _ = std::fs::remove_file(crate::downloader::downloads_dir().join("Me at the zoo.mp4"));
         crate::downloader::download(&app, 0, &yt, &ff)
             .await
             .unwrap();
@@ -280,5 +281,10 @@ mod tests {
             "título não preenchido: {:?}",
             a.items[0].title
         );
+        // Sem --progress o yt-dlp ficava mudo e nada disto chegava.
+        assert_eq!(a.items[0].info.channel, "jawed");
+        assert_eq!(a.items[0].info.duration_secs, Some(19));
+        let p = &a.items[0].progress;
+        assert!(p.downloaded > 0 && p.total.is_some(), "progresso: {p:?}");
     }
 }
