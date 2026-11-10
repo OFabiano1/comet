@@ -13,6 +13,18 @@ pub const CONTENT_MAX_WIDTH: u16 = 64;
 /// Mesmo convite do site (AxolotlBR/src/data/site.ts).
 const DISCORD_INVITE: &str = "discord.gg/AxolotlBR";
 
+/// Logo do README. Todas as linhas com a mesma largura: o centro alinha o bloco, não cada linha.
+const LOGO: [&str; 5] = [
+    r"                          _        ",
+    r"  ___ ___  _ __ ___   ___| |_  _   ",
+    r" / __/ _ \| '_ ` _ \ / _ \ __|| |_ ",
+    r"| (_| (_) | | | | | |  __/ ||_   _|",
+    r" \___\___/|_| |_| |_|\___|\__||_|  ",
+];
+const LOGO_WIDTH: u16 = 35;
+/// Abaixo disso o logo grande come a fila; volta o "☄ COMET" de uma linha.
+const LOGO_MIN_HEIGHT: u16 = 28;
+
 pub fn truncate_ellipsis(s: &str, max: usize) -> String {
     if max == 0 {
         return String::new();
@@ -189,8 +201,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     let item_h = 3u16;
     let empty_h = 2u16;
 
-    // Altura fixa: respiro + cabeçalho(4) + rótulo + input(3) + dica + fila(2) + rodapé.
-    let header_h = 4u16;
+    let big_logo = area.height >= LOGO_MIN_HEIGHT && content_width(area.width) >= LOGO_WIDTH;
+    // Altura fixa: respiro + cabeçalho + rótulo + input(3) + dica + fila(2) + rodapé.
+    let logo_h = if big_logo { LOGO.len() as u16 } else { 1 };
+    let header_h = logo_h + 3;
     let fixed = spacer + header_h + spacer + 1 + 3 + 1 + spacer + 2 + spacer + 1;
     let space_for_body = area.height.saturating_sub(fixed);
     let visible = if app.items.is_empty() {
@@ -222,20 +236,24 @@ pub fn draw(f: &mut Frame, app: &App) {
     .split(block);
 
     // Logo, convite do Discord, versão e status — centralizados.
+    let logo_style = fg(PRIMARY).add_modifier(Modifier::BOLD);
+    let mut header: Vec<Line> = if big_logo {
+        LOGO.iter()
+            .map(|l| Line::from(Span::styled(*l, logo_style)))
+            .collect()
+    } else {
+        vec![Line::from(Span::styled("☄ COMET", logo_style))]
+    };
+    header.extend([
+        Line::from(Span::styled(DISCORD_INVITE, fg(TEXT_SECONDARY))),
+        Line::from(Span::styled(
+            format!("baixador de vídeo · v{}", env!("CARGO_PKG_VERSION")),
+            fg(TEXT_MUTED),
+        )),
+        Line::from(Span::styled(app.status.clone(), fg(TEXT_SECONDARY))),
+    ]);
     f.render_widget(
-        Paragraph::new(vec![
-            Line::from(Span::styled(
-                "☄ COMET",
-                fg(PRIMARY).add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(DISCORD_INVITE, fg(TEXT_SECONDARY))),
-            Line::from(Span::styled(
-                format!("baixador de vídeo · v{}", env!("CARGO_PKG_VERSION")),
-                fg(TEXT_MUTED),
-            )),
-            Line::from(Span::styled(app.status.clone(), fg(TEXT_SECONDARY))),
-        ])
-        .alignment(Alignment::Center),
+        Paragraph::new(header).alignment(Alignment::Center),
         chunks[1],
     );
 
@@ -547,6 +565,153 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(row_of("discord.gg/AxolotlBR"), row_of("☄") + 1);
+    }
+
+    #[test]
+    fn logo_lines_share_one_width() {
+        for line in LOGO {
+            assert_eq!(line.chars().count(), LOGO_WIDTH as usize, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn tall_terminal_gets_ascii_logo_with_invite_below() {
+        let grid = render_grid(&App::default(), 80, LOGO_MIN_HEIGHT);
+        let row_of = |needle: &str| grid.iter().position(|r| r.concat().contains(needle));
+        let last_logo_row = row_of(LOGO[4]).expect("logo grande");
+        assert_eq!(row_of(LOGO[0].trim()), Some(last_logo_row - 4));
+        assert_eq!(row_of("discord.gg/AxolotlBR"), Some(last_logo_row + 1));
+        assert_eq!(row_of("☄"), None);
+        // Um terminal baixo volta pro logo de uma linha.
+        assert!(render(&App::default(), 80, LOGO_MIN_HEIGHT - 1).contains("☄ COMET"));
+    }
+
+    /// Cor do ratatui em CSS; Reset fica com o fundo do Prism.
+    fn css(color: Color) -> String {
+        match color {
+            Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+            _ => "inherit".to_string(),
+        }
+    }
+
+    /// Tela renderizada em HTML, uma célula por caractere (largura fixa, nada desalinha).
+    fn screenshot_html(app: &App, w: u16, h: u16) -> String {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut rows = String::new();
+        for y in 0..h {
+            rows.push_str("<div>");
+            for x in 0..w {
+                let cell = &buf[(x, y)];
+                let sym = match cell.symbol() {
+                    "<" => "&lt;",
+                    ">" => "&gt;",
+                    "&" => "&amp;",
+                    s => s,
+                };
+                let bold = if cell.modifier.contains(Modifier::BOLD) {
+                    ";font-weight:700"
+                } else {
+                    ""
+                };
+                rows.push_str(&format!(
+                    "<i style=\"color:{};background:{}{bold}\">{sym}</i>",
+                    css(cell.fg),
+                    css(cell.bg)
+                ));
+            }
+            rows.push_str("</div>\n");
+        }
+        format!(
+            "<!doctype html><meta charset=\"utf-8\"><style>\
+@font-face{{font-family:JBM;src:url(JetBrainsMono.woff2)}}\
+body{{margin:0;background:{bg}}}\
+.t{{padding:24px;font:15px/20px JBM,'Cascadia Mono',Consolas,monospace;color:#f0f0f4}}\
+.t div{{height:20px;white-space:pre}}\
+.t i{{font-style:normal;display:inline-block;width:10px;height:20px;text-align:center;overflow:visible}}\
+</style><div class=\"t\">\n{rows}</div>",
+            bg = css(BACKGROUND)
+        )
+    }
+
+    /// Gera as telas do README: `.\screenshots.ps1` (roda isto e tira o PNG no Chromium).
+    #[test]
+    #[ignore = "gera arquivos; use .\\screenshots.ps1"]
+    fn render_screenshots() {
+        use std::path::PathBuf;
+        let out = PathBuf::from(
+            std::env::var("COMET_SHOT_DIR").unwrap_or_else(|_| "target/screenshots".into()),
+        );
+        std::fs::create_dir_all(&out).unwrap();
+
+        let zoo = Item {
+            url: "https://www.youtube.com/watch?v=jNQXAC9IVRw".into(),
+            title: "Me at the zoo".into(),
+            site: Site::YouTube,
+            kind: Kind::Video,
+            phase: Phase::Downloading,
+            info: VideoInfo {
+                channel: "jawed".into(),
+                duration_secs: Some(19),
+            },
+            progress: Progress {
+                downloaded: 143_220,
+                total: Some(223_779),
+                speed: Some(120_000.0),
+                eta_secs: Some(1),
+                audio: false,
+            },
+            error: None,
+            saved: None,
+        };
+        let tweet = Item {
+            url: "https://x.com/i/status/1".into(),
+            title: "Layne".into(),
+            site: Site::Twitter,
+            kind: Kind::Gif,
+            phase: Phase::Queued,
+            info: VideoInfo {
+                channel: "Layne".into(),
+                duration_secs: Some(10),
+            },
+            progress: Progress::default(),
+            error: None,
+            saved: None,
+        };
+        let downloads = PathBuf::from(r"C:\Users\voce\Downloads\Comet");
+        let done = |mut it: Item, file: &str| {
+            it.phase = Phase::Done;
+            it.saved = Some(downloads.join(file));
+            it
+        };
+
+        let telas = [
+            ("1-inicio", App::default()),
+            (
+                "2-baixando",
+                App {
+                    status: crate::app::STATUS_BUSY.into(),
+                    items: vec![zoo.clone(), tweet.clone()],
+                    busy: true,
+                    ..App::default()
+                },
+            ),
+            (
+                "3-pronto",
+                App {
+                    items: vec![done(zoo, "Me at the zoo.mp4"), done(tweet, "Layne [1].gif")],
+                    completed: 2,
+                    selected: 1,
+                    ..App::default()
+                },
+            ),
+        ];
+        for (name, app) in telas {
+            let html = screenshot_html(&app, 80, 32);
+            std::fs::write(out.join(format!("{name}.html")), html).unwrap();
+        }
     }
 
     #[test]

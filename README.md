@@ -12,6 +12,14 @@ Baixador de vídeos no terminal. Cola a URL, aperta Enter, pronto.
 
 
 
+## Telas
+
+![início](screenshots/1-inicio.png)
+![baixando](screenshots/2-baixando.png)
+![pronto](screenshots/3-pronto.png)
+
+Geradas da UI de verdade com `.\screenshots.ps1`.
+
 ## Suporta
 
 - YouTube (`youtube.com/watch`, `youtu.be`)
