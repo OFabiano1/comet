@@ -33,7 +33,13 @@ pub fn detect(raw: &str) -> Option<Site> {
 
 fn host_from(host: &str, path: &str) -> Option<Site> {
     match host {
-        "youtube.com" | "youtu.be" | "m.youtube.com" => Some(Site::YouTube),
+        // só link de vídeo: canal ou playlist baixaria tudo
+        "youtube.com" | "m.youtube.com"
+            if ["watch?", "shorts/", "live/"].iter().any(|p| path.starts_with(p)) =>
+        {
+            Some(Site::YouTube)
+        }
+        "youtu.be" if !path.is_empty() => Some(Site::YouTube),
         "x.com" | "twitter.com" if path.contains("status/") => Some(Site::Twitter),
         "tiktok.com" if path.contains("video/") || path.contains("photo/") => Some(Site::TikTok),
         "vm.tiktok.com" => Some(Site::TikTok),
@@ -77,5 +83,16 @@ mod tests {
         assert_eq!(detect(""), None);
         assert_eq!(detect("https://x.com/user"), None);
         assert_eq!(detect("https://www.tiktok.com/@user"), None);
+    }
+
+    #[test]
+    fn rejects_youtube_channels_and_playlists() {
+        assert_eq!(detect("https://www.youtube.com/@canal"), None);
+        assert_eq!(detect("https://www.youtube.com/@canal/videos"), None);
+        assert_eq!(detect("https://www.youtube.com/playlist?list=PL1"), None);
+        assert_eq!(detect("https://youtube.com/channel/UC1"), None);
+        assert_eq!(detect("https://youtu.be/"), None);
+        assert_eq!(detect("https://youtube.com/shorts/abc"), Some(Site::YouTube));
+        assert_eq!(detect("https://m.youtube.com/live/abc"), Some(Site::YouTube));
     }
 }

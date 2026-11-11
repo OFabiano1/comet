@@ -197,7 +197,7 @@ pub async fn download(
     app: &Arc<Mutex<App>>,
     idx: usize,
     ytdlp: &Path,
-    _ffmpeg: &Path,
+    ffmpeg: &Path,
 ) -> Result<()> {
     let (url, site, out_dir) = {
         let mut a = app.lock().await;
@@ -227,7 +227,12 @@ pub async fn download(
         output_template(site).to_string(),
     ];
     args.extend(title_cleanup_args());
-    args.extend(browser_cookie_args());
+    args.push("--ffmpeg-location".to_string());
+    args.push(ffmpeg.display().to_string());
+    // YouTube não precisa de login; ler cookies do Chrome aberto só faria ele falhar
+    if site != Site::YouTube {
+        args.extend(browser_cookie_args());
+    }
     args.push(url.clone());
 
     let mut child = tokio::process::Command::new(ytdlp)
@@ -306,7 +311,7 @@ pub async fn download(
     };
     if ok && kind == Kind::Gif {
         if let Some(mp4) = final_path {
-            to_gif(app, idx, _ffmpeg, &mp4).await?;
+            to_gif(app, idx, ffmpeg, &mp4).await?;
         } else {
             let mut a = app.lock().await;
             a.items[idx].phase = Phase::Done;
