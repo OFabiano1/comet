@@ -58,6 +58,13 @@ impl Progress {
     }
 }
 
+/// Linha do histórico: o que aparece na tela e o link para baixar de novo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistEntry {
+    pub label: String,
+    pub url: String,
+}
+
 pub struct App {
     pub input: String,
     pub status: String,
@@ -66,6 +73,12 @@ pub struct App {
     pub completed: usize,
     pub busy: bool,
     pub should_quit: bool,
+    /// Tela do histórico no lugar da fila (tecla H).
+    pub show_history: bool,
+    /// Downloads concluídos, mais novo primeiro (ver downloader::record_history).
+    pub history: Vec<HistEntry>,
+    /// Linha marcada no histórico (↑/↓ e enter baixa de novo).
+    pub history_sel: usize,
 }
 
 pub const STATUS_READY: &str = "pronto";
@@ -81,6 +94,9 @@ impl Default for App {
             completed: 0,
             busy: false,
             should_quit: false,
+            show_history: false,
+            history: Vec::new(),
+            history_sel: 0,
         }
     }
 }
@@ -118,6 +134,11 @@ impl App {
                 Kind::Gif => Kind::Video,
             };
         }
+    }
+
+    pub fn toggle_history(&mut self) {
+        self.show_history = !self.show_history;
+        self.history_sel = 0;
     }
 
     /// "2 itens · 1 baixado"; sem nada baixado, só a contagem.

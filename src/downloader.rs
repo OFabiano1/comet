@@ -1,6 +1,7 @@
-use crate::app::{App, Kind, Phase, Progress, VideoInfo};
+use crate::app::{App, HistEntry, Item, Kind, Phase, Progress, VideoInfo};
 use crate::sites::Site;
 use anyhow::Result;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -173,12 +174,61 @@ pub fn title_cleanup_args() -> Vec<String> {
     .collect()
 }
 
-/// YouTube tem título único; tweet e TikTok repetem, então o id evita sobrescrever.
+/// Nome do arquivo = título, com "Comet - " na frente.
+/// shortcut: título repetido (tweet/TikTok) faz o yt-dlp pular o download, sem sufixo numérico; upgrade se virar problema.
 pub fn output_template(site: Site) -> &'static str {
     match site {
-        Site::YouTube => "%(title).80B.%(ext)s",
-        Site::Twitter | Site::TikTok => "%(title).60B [%(id)s].%(ext)s",
+        Site::YouTube => "Comet - %(title).80B.%(ext)s",
+        Site::Twitter | Site::TikTok => "Comet - %(title).60B.%(ext)s",
     }
+}
+
+/// Arquivo de histórico ao lado do bin (%LOCALAPPDATA%\comet\historico.txt).
+pub fn history_path() -> PathBuf {
+    std::env::var("LOCALAPPDATA")
+        .map(|l| PathBuf::from(l).join("comet").join("historico.txt"))
+        .unwrap_or_else(|_| PathBuf::from("comet-historico.txt"))
+}
+
+/// Linha do histórico: "gif · twitter · título".
+pub fn history_label(item: &Item) -> String {
+    let kind = match item.kind {
+        Kind::Video => "vídeo",
+        Kind::Gif => "gif",
+    };
+    format!("{kind} · {} · {}", item.site.label(), item.title).replace(['\t', '\n'], " ")
+}
+
+/// Anota um download concluído: "label\tcaminho\turl". Falha de escrita não derruba a fila.
+pub fn record_history(item: &Item) -> HistEntry {
+    let label = history_label(item);
+    let path = item.saved.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    let file = history_path();
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&file) {
+        let _ = writeln!(f, "{label}\t{path}\t{}", item.url);
+    }
+    HistEntry {
+        label,
+        url: item.url.clone(),
+    }
+}
+
+/// Uma linha do arquivo. Linha antiga, sem url, fica com url vazia.
+pub fn parse_history_line(line: &str) -> HistEntry {
+    let mut parts = line.split('\t');
+    HistEntry {
+        label: parts.next().unwrap_or_default().to_string(),
+        url: parts.nth(1).unwrap_or_default().to_string(),
+    }
+}
+
+/// Histórico salvo, mais novo primeiro. Sem arquivo = histórico vazio.
+pub fn load_history() -> Vec<HistEntry> {
+    let text = std::fs::read_to_string(history_path()).unwrap_or_default();
+    text.lines().rev().map(parse_history_line).collect()
 }
 
 pub fn downloads_dir() -> PathBuf {
@@ -323,9 +373,14 @@ pub async fn download(
     Ok(())
 }
 
+/// Duração máxima do GIF em segundos; a paleta usa o mesmo trecho.
+pub const GIF_MAX_SECS: &str = "30";
+
 pub fn palette_args(input: &Path, png: &Path) -> Vec<String> {
     vec![
         "-y".to_string(),
+        "-t".to_string(),
+        GIF_MAX_SECS.to_string(),
         "-i".to_string(),
         input.to_string_lossy().to_string(),
         "-vf".to_string(),
@@ -337,6 +392,8 @@ pub fn palette_args(input: &Path, png: &Path) -> Vec<String> {
 pub fn gif_args(input: &Path, png: &Path, out: &Path) -> Vec<String> {
     vec![
         "-y".to_string(),
+        "-t".to_string(),
+        GIF_MAX_SECS.to_string(),
         "-i".to_string(),
         input.to_string_lossy().to_string(),
         "-i".to_string(),
@@ -512,16 +569,40 @@ mod tests {
     }
 
     #[test]
-    fn output_names_keep_tweets_unique() {
-        assert_eq!(output_template(Site::YouTube), "%(title).80B.%(ext)s");
-        assert!(output_template(Site::Twitter).contains("[%(id)s]"));
-        assert!(output_template(Site::TikTok).contains("[%(id)s]"));
+    fn output_names_start_with_comet_and_title() {
+        assert_eq!(output_template(Site::YouTube), "Comet - %(title).80B.%(ext)s");
+        assert_eq!(output_template(Site::Twitter), "Comet - %(title).60B.%(ext)s");
+        assert_eq!(output_template(Site::TikTok), "Comet - %(title).60B.%(ext)s");
         let args = title_cleanup_args();
         assert_eq!(args.len(), 12);
         assert_eq!(
             args[..3],
             ["--replace-in-metadata", "title", r"https?://\S+"]
         );
+    }
+
+    #[test]
+    fn history_label_has_kind_site_and_title() {
+        let item = Item {
+            url: String::new(),
+            title: "Layne\tcom quebra".into(),
+            site: Site::Twitter,
+            kind: Kind::Gif,
+            phase: Phase::Done,
+            info: VideoInfo::default(),
+            progress: Progress::default(),
+            error: None,
+            saved: None,
+        };
+        assert_eq!(history_label(&item), "gif · twitter · Layne com quebra");
+    }
+
+    #[test]
+    fn history_line_keeps_url_for_redownload() {
+        let e = parse_history_line("gif · twitter · Layne\tC:\\x.gif\thttps://x.com/u/status/1");
+        assert_eq!(e.label, "gif · twitter · Layne");
+        assert_eq!(e.url, "https://x.com/u/status/1");
+        assert_eq!(parse_history_line("linha antiga").url, "");
     }
 
     #[test]
@@ -533,6 +614,8 @@ mod tests {
             palette_args(mp4, png),
             vec![
                 "-y".to_string(),
+                "-t".to_string(),
+                GIF_MAX_SECS.to_string(),
                 "-i".to_string(),
                 mp4.to_string_lossy().to_string(),
                 "-vf".to_string(),
@@ -544,6 +627,8 @@ mod tests {
             gif_args(mp4, png, gif),
             vec![
                 "-y".to_string(),
+                "-t".to_string(),
+                GIF_MAX_SECS.to_string(),
                 "-i".to_string(),
                 mp4.to_string_lossy().to_string(),
                 "-i".to_string(),

@@ -61,11 +61,21 @@ async fn run_queue(app: Arc<Mutex<App>>) {
             a.items.iter().position(|i| i.phase == Phase::Queued)
         };
         let Some(idx) = next else { break };
-        if let Err(e) = downloader::download(&app, idx, &ytdlp, &ffmpeg).await {
-            let mut a = app.lock().await;
-            let item = &mut a.items[idx];
-            item.phase = Phase::Failed;
-            item.error = Some(e.to_string());
+        match downloader::download(&app, idx, &ytdlp, &ffmpeg).await {
+            Err(e) => {
+                let mut a = app.lock().await;
+                let item = &mut a.items[idx];
+                item.phase = Phase::Failed;
+                item.error = Some(e.to_string());
+            }
+            Ok(()) => {
+                let mut a = app.lock().await;
+                let item = a.items[idx].clone();
+                if item.phase == Phase::Done && item.saved.is_some() {
+                    let entry = downloader::record_history(&item);
+                    a.history.insert(0, entry);
+                }
+            }
         }
     }
     let mut a = app.lock().await;
@@ -92,7 +102,10 @@ fn open_in_explorer(file: Option<&std::path::Path>) {
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut terminal = Terminal::new()?;
-    let app = Arc::new(Mutex::new(App::default()));
+    let app = Arc::new(Mutex::new(App {
+        history: downloader::load_history(),
+        ..App::default()
+    }));
 
     while !app.lock().await.should_quit {
         {
@@ -130,6 +143,9 @@ async fn main() -> Result<()> {
                         let file = a.items.get(a.selected).and_then(|i| i.saved.clone());
                         open_in_explorer(file.as_deref().filter(|f| f.is_file()));
                     }
+                    KeyCode::Char('h') | KeyCode::Char('H') if a.input.is_empty() => {
+                        a.toggle_history()
+                    }
                     KeyCode::Char('q') | KeyCode::Char('Q') if a.input.is_empty() && !a.busy => {
                         a.should_quit = true
                     }
@@ -137,12 +153,49 @@ async fn main() -> Result<()> {
                     KeyCode::Backspace => {
                         a.input.pop();
                     }
+                    // No histórico, enter põe o link de volta na fila e baixa.
+                    KeyCode::Enter if a.show_history => {
+                        a.input = a
+                            .history
+                            .get(a.history_sel)
+                            .map(|h| h.url.clone())
+                            .unwrap_or_default();
+                        match a.add_url() {
+                            Ok(()) => {
+                                a.show_history = false;
+                                a.status = app::STATUS_READY.to_string();
+                                if !a.busy {
+                                    a.busy = true;
+                                    a.status = app::STATUS_BUSY.to_string();
+                                    let handle = app.clone();
+                                    tokio::spawn(async move { run_queue(handle).await });
+                                }
+                            }
+                            Err(e) => {
+                                a.input.clear();
+                                a.status = e;
+                            }
+                        }
+                    }
                     KeyCode::Enter => match a.add_url() {
                         Ok(()) => a.status = app::STATUS_READY.to_string(),
                         Err(e) => a.status = e,
                     },
+                    // Seta de cima no topo da fila abre o histórico; dentro dele, sobe na lista.
+                    KeyCode::Up if a.show_history => {
+                        a.history_sel = a.history_sel.saturating_sub(1);
+                    }
+                    KeyCode::Up if a.input.is_empty() && a.selected == 0 && !a.history.is_empty() => {
+                        a.show_history = true;
+                        a.history_sel = 0;
+                    }
                     KeyCode::Up => {
                         a.selected = a.selected.saturating_sub(1);
+                    }
+                    KeyCode::Down if a.show_history => {
+                        if a.history_sel + 1 < a.history.len() {
+                            a.history_sel += 1;
+                        }
                     }
                     KeyCode::Down if a.selected + 1 < a.items.len() => a.selected += 1,
                     _ => {}

@@ -22,6 +22,16 @@ const LOGO: [&str; 5] = [
     r" \___\___/|_| |_| |_|\___|\__||_|  ",
 ];
 const LOGO_WIDTH: u16 = 35;
+/// Cometa desenhado à mão (não achei um pronto), na frente do logo: mesma altura, 12 colunas.
+const COMET: [&str; 5] = [
+    r"       *    ",
+    r"    \       ",
+    r" ~~~~~ O    ",
+    r"    /       ",
+    r"       .    ",
+];
+const COMET_WIDTH: u16 = 12;
+const BIG_LOGO_WIDTH: u16 = LOGO_WIDTH + COMET_WIDTH;
 /// Abaixo disso o logo grande come a fila; volta o "☄ COMET" de uma linha.
 const LOGO_MIN_HEIGHT: u16 = 28;
 
@@ -201,7 +211,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let item_h = 3u16;
     let empty_h = 2u16;
 
-    let big_logo = area.height >= LOGO_MIN_HEIGHT && content_width(area.width) >= LOGO_WIDTH;
+    let big_logo = area.height >= LOGO_MIN_HEIGHT && content_width(area.width) >= BIG_LOGO_WIDTH;
     // Altura fixa: respiro + cabeçalho + rótulo + input(3) + dica + fila(2) + rodapé.
     let logo_h = if big_logo { LOGO.len() as u16 } else { 1 };
     let header_h = logo_h + 3;
@@ -213,7 +223,9 @@ pub fn draw(f: &mut Frame, app: &App) {
         let max_items = (space_for_body / item_h).max(1);
         (app.items.len() as u16).min(max_items)
     };
-    let body_h = if app.items.is_empty() {
+    let body_h = if app.show_history {
+        space_for_body.max(2)
+    } else if app.items.is_empty() {
         empty_h
     } else {
         visible * item_h
@@ -238,8 +250,15 @@ pub fn draw(f: &mut Frame, app: &App) {
     // Logo, convite do Discord, versão e status — centralizados.
     let logo_style = fg(PRIMARY).add_modifier(Modifier::BOLD);
     let mut header: Vec<Line> = if big_logo {
+        // Cometa na frente do nome, linha a linha.
         LOGO.iter()
-            .map(|l| Line::from(Span::styled(*l, logo_style)))
+            .zip(COMET.iter())
+            .map(|(l, c)| {
+                Line::from(vec![
+                    Span::styled(*c, logo_style),
+                    Span::styled(*l, logo_style),
+                ])
+            })
             .collect()
     } else {
         vec![Line::from(Span::styled("☄ COMET", logo_style))]
@@ -318,18 +337,50 @@ pub fn draw(f: &mut Frame, app: &App) {
     };
     f.render_widget(Paragraph::new(Line::from(hint)), chunks[5]);
 
-    // Cabeçalho da fila + contador.
+    // Cabeçalho da fila (ou do histórico) + contador.
+    let (head, count) = if app.show_history {
+        let n = app.history.len();
+        let baixados = if n == 1 { "baixado" } else { "baixados" };
+        ("HISTÓRICO", format!("{n} {baixados}"))
+    } else {
+        ("FILA", app.summary())
+    };
     f.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled("FILA", fg(TEXT_SECONDARY))),
-            Line::from(Span::styled(app.summary(), fg(TEXT_MUTED))),
+            Line::from(Span::styled(head, fg(TEXT_SECONDARY))),
+            Line::from(Span::styled(count, fg(TEXT_MUTED))),
         ]),
         chunks[7],
     );
 
-    // Corpo da fila: itens ou estado vazio.
+    // Corpo: histórico, itens da fila ou estado vazio.
     let body = chunks[8];
-    if app.items.is_empty() {
+    if app.show_history {
+        let lines: Vec<Line> = if app.history.is_empty() {
+            vec![Line::from(Span::styled("nenhum download ainda", fg(TEXT_SECONDARY)))]
+        } else {
+            let rows = body.height as usize;
+            let offset = app.history_sel.saturating_sub(rows.saturating_sub(1));
+            app.history
+                .iter()
+                .enumerate()
+                .skip(offset)
+                .take(rows)
+                .map(|(i, h)| {
+                    let sel = i == app.history_sel;
+                    let text = truncate_ellipsis(&h.label, (body.width as usize).saturating_sub(2));
+                    Line::from(vec![
+                        Span::styled(if sel { "▎" } else { " " }, fg(PRIMARY)),
+                        Span::styled(
+                            format!(" {text}"),
+                            fg(if sel { TEXT_PRIMARY } else { TEXT_SECONDARY }),
+                        ),
+                    ])
+                })
+                .collect()
+        };
+        f.render_widget(Paragraph::new(lines), body);
+    } else if app.items.is_empty() {
         f.render_widget(
             Paragraph::new(vec![
                 Line::from(Span::styled("fila vazia", fg(TEXT_SECONDARY))),
@@ -392,7 +443,11 @@ pub fn draw(f: &mut Frame, app: &App) {
     // Rodapé compacto.
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "enter adiciona · d baixa · g gif · o pasta · q sai",
+            if app.show_history {
+                "↑↓ escolhe · enter baixa de novo · h volta à fila · q sai"
+            } else {
+                "enter adiciona · d baixa · g gif · o pasta · h histórico · q sai"
+            },
             fg(TEXT_MUTED),
         )))
         .alignment(Alignment::Center),
@@ -557,6 +612,22 @@ mod tests {
     }
 
     #[test]
+    fn history_view_lists_finished_downloads() {
+        let app = App {
+            show_history: true,
+            history: vec![crate::app::HistEntry {
+                label: "gif · twitter · Layne".into(),
+                url: "https://x.com/u/status/1".into(),
+            }],
+            ..App::default()
+        };
+        let text = render(&app, 80, 30);
+        assert!(text.contains("HISTÓRICO"));
+        assert!(text.contains("gif · twitter · Layne"));
+        assert!(text.contains("h volta à fila"));
+    }
+
+    #[test]
     fn discord_invite_sits_right_under_the_logo() {
         let grid = render_grid(&App::default(), 80, 24);
         let row_of = |needle: &str| {
@@ -571,6 +642,9 @@ mod tests {
     fn logo_lines_share_one_width() {
         for line in LOGO {
             assert_eq!(line.chars().count(), LOGO_WIDTH as usize, "{line:?}");
+        }
+        for line in COMET {
+            assert_eq!(line.chars().count(), COMET_WIDTH as usize, "{line:?}");
         }
     }
 
