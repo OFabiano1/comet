@@ -11,7 +11,7 @@ use ratatui::Frame;
 
 pub const CONTENT_MAX_WIDTH: u16 = 64;
 /// Mesmo convite do site (AxolotlBR/src/data/site.ts).
-const DISCORD_INVITE: &str = "discord.gg/AxolotlBR";
+const DISCORD_INVITE: &str = "discord.gg/8WtmZTySdB";
 
 /// Logo do README. Todas as linhas com a mesma largura: o centro alinha o bloco, não cada linha.
 const LOGO: [&str; 5] = [
@@ -543,7 +543,7 @@ mod tests {
         let app = App::default();
         let text = render(&app, 80, 24);
         assert!(text.contains("☄ COMET"));
-        assert!(text.contains("discord.gg/AxolotlBR"));
+        assert!(text.contains("discord.gg/8WtmZTySdB"));
         assert!(text.contains("baixador de vídeo · v"));
         assert!(text.contains("cola o link aqui (ctrl+v)"));
         assert!(text.contains("youtube · twitter/x · tiktok"));
@@ -635,7 +635,7 @@ mod tests {
                 .position(|row| row.concat().contains(needle))
                 .unwrap()
         };
-        assert_eq!(row_of("discord.gg/AxolotlBR"), row_of("☄") + 1);
+        assert_eq!(row_of("discord.gg/8WtmZTySdB"), row_of("☄") + 1);
     }
 
     #[test]
@@ -654,7 +654,7 @@ mod tests {
         let row_of = |needle: &str| grid.iter().position(|r| r.concat().contains(needle));
         let last_logo_row = row_of(LOGO[4]).expect("logo grande");
         assert_eq!(row_of(LOGO[0].trim()), Some(last_logo_row - 4));
-        assert_eq!(row_of("discord.gg/AxolotlBR"), Some(last_logo_row + 1));
+        assert_eq!(row_of("discord.gg/8WtmZTySdB"), Some(last_logo_row + 1));
         assert_eq!(row_of("☄"), None);
         // Um terminal baixo volta pro logo de uma linha.
         assert!(render(&App::default(), 80, LOGO_MIN_HEIGHT - 1).contains("☄ COMET"));
