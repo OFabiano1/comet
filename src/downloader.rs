@@ -231,7 +231,52 @@ pub fn load_history() -> Vec<HistEntry> {
     text.lines().rev().map(parse_history_line).collect()
 }
 
+/// Pasta que a pessoa escolheu com `cd`? Home (terminal recém-aberto), pasta do exe
+/// (duplo clique) e o Windows (terminal de admin abre em System32) não contam.
+pub fn is_chosen_dir(
+    cwd: &Path,
+    home: Option<&Path>,
+    exe_dir: Option<&Path>,
+    windows: Option<&Path>,
+) -> bool {
+    let norm = |p: &Path| p.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase();
+    let cwd = norm(cwd);
+    let same = |p: Option<&Path>| p.is_some_and(|p| norm(p) == cwd);
+    let inside = |p: Option<&Path>| {
+        p.is_some_and(|p| {
+            let w = norm(p);
+            cwd == w || cwd.starts_with(&format!("{w}\\"))
+        })
+    };
+    !same(home) && !same(exe_dir) && !inside(windows)
+}
+
+/// Baixa onde o terminal está (`cd Downloads` → `comet`); fora disso, Downloads\Comet.
 pub fn downloads_dir() -> PathBuf {
+    // Teste de rede baixa de verdade: não pode sujar o repositório.
+    if cfg!(test) {
+        return default_downloads_dir();
+    }
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf));
+    let windows = std::env::var_os("SystemRoot").map(PathBuf::from);
+    match std::env::current_dir() {
+        Ok(cwd)
+            if is_chosen_dir(
+                &cwd,
+                dirs::home_dir().as_deref(),
+                exe_dir.as_deref(),
+                windows.as_deref(),
+            ) =>
+        {
+            cwd
+        }
+        _ => default_downloads_dir(),
+    }
+}
+
+pub fn default_downloads_dir() -> PathBuf {
     dirs::download_dir()
         .unwrap_or_else(|| {
             std::env::current_exe()
@@ -251,14 +296,19 @@ pub async fn download(
 ) -> Result<()> {
     let (url, site, out_dir) = {
         let mut a = app.lock().await;
+        let out_dir = a.out_dir.clone();
         let item = &mut a.items[idx];
         item.phase = Phase::Downloading;
         item.progress = Progress::default();
-        (item.url.clone(), item.site, downloads_dir())
+        (item.url.clone(), item.site, out_dir)
     };
     tokio::fs::create_dir_all(&out_dir).await?;
 
     let mut args: Vec<String> = vec![
+        // Sem isto o Windows usa cp1252: emoji do título some do FILE: (caminho errado, gif falha)
+        // e acento vira byte inválido, que derruba a leitura do stdout.
+        "--encoding".to_string(),
+        "utf-8".to_string(),
         // --print liga o modo silencioso, que esconde o progresso; --progress traz de volta.
         "--progress".to_string(),
         "--newline".to_string(),
@@ -512,6 +562,23 @@ mod tests {
         );
         assert_eq!(parse_error("algo estranho\n"), "algo estranho");
         assert_eq!(parse_error(""), "o download falhou");
+    }
+
+    #[test]
+    fn downloads_where_the_terminal_is_unless_it_was_not_chosen() {
+        let home = Path::new(r"C:\Users\F");
+        let exe = Path::new(r"C:\Users\F\.cargo\bin");
+        let win = Path::new(r"C:\WINDOWS");
+        let chosen = |cwd: &str| is_chosen_dir(Path::new(cwd), Some(home), Some(exe), Some(win));
+        assert!(chosen(r"C:\Users\F\Downloads"));
+        assert!(chosen(r"D:\videos\memes\"));
+        // Terminal recém-aberto, duplo clique e admin: cai em Downloads\Comet.
+        assert!(!chosen(r"C:\Users\F"));
+        assert!(!chosen(r"c:\users\f\"));
+        assert!(!chosen(r"C:\Users\F\.cargo\bin"));
+        assert!(!chosen(r"C:\Windows\System32"));
+        // Só o próprio Windows: pasta com nome parecido vale.
+        assert!(chosen(r"C:\WindowsApps-backup"));
     }
 
     #[test]

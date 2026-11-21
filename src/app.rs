@@ -79,6 +79,8 @@ pub struct App {
     pub history: Vec<HistEntry>,
     /// Linha marcada no histórico (↑/↓ e enter baixa de novo).
     pub history_sel: usize,
+    /// Onde os downloads caem; decidido uma vez na abertura (ver downloader::downloads_dir).
+    pub out_dir: std::path::PathBuf,
 }
 
 pub const STATUS_READY: &str = "pronto";
@@ -97,6 +99,7 @@ impl Default for App {
             show_history: false,
             history: Vec::new(),
             history_sel: 0,
+            out_dir: crate::downloader::downloads_dir(),
         }
     }
 }

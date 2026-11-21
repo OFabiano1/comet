@@ -1,7 +1,7 @@
 use crate::app::{App, Item, Kind, Phase, Progress};
 use crate::theme::{
-    BACKGROUND, DANGER, PRIMARY, PRIMARY_HOVER, SUCCESS, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY,
-    WARNING,
+    BACKGROUND, DANGER, PRIMARY, PRIMARY_HOVER, SUCCESS, SURFACE, TEXT_BRAND, TEXT_MUTED,
+    TEXT_PRIMARY, TEXT_SECONDARY, WARNING,
 };
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -87,8 +87,8 @@ fn fg(color: Color) -> Style {
 fn phase_chip(item: &Item) -> (String, Style) {
     match (item.phase, &item.error) {
         (Phase::Queued, _) => ("na fila".to_string(), fg(TEXT_MUTED)),
-        (Phase::Downloading, _) => ("baixando".to_string(), fg(PRIMARY_HOVER)),
-        (Phase::Converting, _) => ("convertendo pra gif".to_string(), fg(PRIMARY_HOVER)),
+        (Phase::Downloading, _) => ("baixando".to_string(), fg(TEXT_BRAND)),
+        (Phase::Converting, _) => ("convertendo pra gif".to_string(), fg(TEXT_BRAND)),
         (Phase::Done, None) => match item.saved.as_deref().and_then(short_folder) {
             Some(folder) => (format!("✓ salvo em {folder} · o mostra"), fg(SUCCESS)),
             None => ("✓ pronto".to_string(), fg(SUCCESS)),
@@ -103,8 +103,14 @@ fn phase_chip(item: &Item) -> (String, Style) {
 
 /// `C:\Users\x\Downloads\Comet\a.mp4` → `Downloads\Comet`: o bastante pra achar a pasta.
 pub fn short_folder(file: &std::path::Path) -> Option<String> {
-    let dir = file.parent()?;
-    let name = dir.file_name()?.to_string_lossy();
+    short_dir(file.parent()?)
+}
+
+/// `C:\Users\x\Downloads` → `x\Downloads`; raiz de disco (`D:\`) fica inteira.
+pub fn short_dir(dir: &std::path::Path) -> Option<String> {
+    let Some(name) = dir.file_name().map(|n| n.to_string_lossy()) else {
+        return Some(dir.display().to_string());
+    };
     Some(match dir.parent().and_then(|p| p.file_name()) {
         Some(up) => format!("{}\\{name}", up.to_string_lossy()),
         None => name.to_string(),
@@ -195,7 +201,7 @@ fn progress_line(p: &Progress, width: usize) -> Line<'static> {
         (done.min(bar_w), bar_w - done.min(bar_w))
     };
     Line::from(vec![
-        Span::styled(label, fg(PRIMARY_HOVER)),
+        Span::styled(label, fg(TEXT_BRAND)),
         Span::styled("█".repeat(filled), fg(PRIMARY_HOVER)),
         Span::styled("░".repeat(empty), fg(TEXT_MUTED)),
         Span::styled(tail, fg(TEXT_SECONDARY)),
@@ -248,7 +254,8 @@ pub fn draw(f: &mut Frame, app: &App) {
     .split(block);
 
     // Logo, convite do Discord, versão e status — centralizados.
-    let logo_style = fg(PRIMARY).add_modifier(Modifier::BOLD);
+    // Logo grande é gráfico (3:1 basta); o de uma linha é texto e pede o roxo de texto.
+    let logo_style = fg(if big_logo { PRIMARY } else { TEXT_BRAND }).add_modifier(Modifier::BOLD);
     let mut header: Vec<Line> = if big_logo {
         // Cometa na frente do nome, linha a linha.
         LOGO.iter()
@@ -282,14 +289,16 @@ pub fn draw(f: &mut Frame, app: &App) {
         chunks[3],
     );
 
-    // O campo está sempre em foco: borda no anel de foco do Prism.
+    // Campo do Prism: superfície Obsidian e, sempre em foco, borda em --prism-primary.
     let input_rect = chunks[4];
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(fg(PRIMARY_HOVER));
+        .border_style(fg(PRIMARY));
     let inner = block.inner(input_rect);
     f.render_widget(block, input_rect);
+    // Só o miolo: no canto arredondado o fundo apareceria como quadrado.
+    f.buffer_mut().set_style(inner, Style::new().bg(SURFACE));
     // 2 colunas reservadas: seta `↵` e cursor no fim do texto.
     let text_width = inner.width.saturating_sub(2) as usize;
     let (text, style) = if app.input.is_empty() {
@@ -352,6 +361,22 @@ pub fn draw(f: &mut Frame, app: &App) {
         ]),
         chunks[7],
     );
+    // Destino na mesma linha do rótulo: a pasta muda com o `cd`, então fica à vista.
+    if !app.show_history {
+        let dest = short_dir(&app.out_dir).unwrap_or_default();
+        let room = (chunks[7].width as usize).saturating_sub(head.chars().count() + 10);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("salva em {}", tail_ellipsis(&dest, room)),
+                fg(TEXT_MUTED),
+            )))
+            .alignment(Alignment::Right),
+            Rect {
+                height: 1,
+                ..chunks[7]
+            },
+        );
+    }
 
     // Corpo: histórico, itens da fila ou estado vazio.
     let body = chunks[8];
@@ -609,6 +634,22 @@ mod tests {
             };
             assert!(render(&app, 80, 24).contains(expected), "faltou {expected}");
         }
+    }
+
+    #[test]
+    fn queue_header_shows_where_files_go() {
+        let app = App {
+            out_dir: std::path::PathBuf::from(r"C:\Users\F\Downloads"),
+            ..App::default()
+        };
+        assert!(render(&app, 80, 24).contains("salva em F\\Downloads"));
+        assert_eq!(short_dir(std::path::Path::new(r"D:\")).as_deref(), Some(r"D:\"));
+        // Terminal estreito corta o começo do caminho, nunca passa da linha.
+        let narrow = App {
+            out_dir: std::path::PathBuf::from(r"C:\um\caminho bem comprido de verdade\Downloads"),
+            ..App::default()
+        };
+        render(&narrow, 24, 20);
     }
 
     #[test]

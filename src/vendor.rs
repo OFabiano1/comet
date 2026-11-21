@@ -265,7 +265,7 @@ mod tests {
         let (yt, ff) = ensure_binaries(&app).await.unwrap();
         // Arquivo de uma rodada anterior faz o yt-dlp pular o download (e o progresso).
         for ext in ["mp4", "gif"] {
-            let old = crate::downloader::downloads_dir().join(format!("Me at the zoo.{ext}"));
+            let old = crate::downloader::downloads_dir().join(format!("Comet - Me at the zoo.{ext}"));
             let _ = std::fs::remove_file(old);
         }
         crate::downloader::download(&app, 0, &yt, &ff)
@@ -285,6 +285,33 @@ mod tests {
         assert_eq!(saved.extension().unwrap(), "gif");
         assert!(saved.is_file(), "{saved:?}");
         assert!(!saved.with_extension("mp4").exists(), "mp4 deveria sair");
+    }
+
+    #[tokio::test]
+    #[ignore = "download real de rede; rodar com `cargo test --ignored`"]
+    async fn real_tweet_gif_with_emoji_in_title() {
+        // Quote-tweet da Loritta: título "Loritta Morenitta 😘 - …". Em cp1252 o emoji
+        // sumia do FILE:, o caminho não existia e o gif caía em "gif falhou".
+        let app = Arc::new(Mutex::new(App::default()));
+        app.lock().await.items.push(crate::app::Item {
+            url: "https://x.com/LorittaBot/status/2123915276953784654".into(),
+            title: "…".into(),
+            site: crate::sites::Site::Twitter,
+            kind: crate::app::Kind::Gif,
+            phase: crate::app::Phase::Queued,
+            info: Default::default(),
+            progress: Default::default(),
+            error: None,
+            saved: None,
+        });
+        let (yt, ff) = ensure_binaries(&app).await.unwrap();
+        crate::downloader::download(&app, 0, &yt, &ff).await.unwrap();
+        let a = app.lock().await;
+        assert_eq!(a.items[0].error, None);
+        assert!(a.items[0].title.contains('😘'), "{:?}", a.items[0].title);
+        let saved = a.items[0].saved.clone().expect("caminho salvo");
+        assert!(saved.is_file(), "{saved:?}");
+        let _ = std::fs::remove_file(saved);
     }
 
     #[tokio::test]
