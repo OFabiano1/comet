@@ -13,6 +13,7 @@ pub enum Phase {
 pub enum Kind {
     Video,
     Gif,
+    Audio,
 }
 
 #[derive(Debug, Clone)]
@@ -130,12 +131,18 @@ impl App {
     }
 
     pub fn toggle_gif(&mut self) {
+        self.toggle_kind(Kind::Gif);
+    }
+
+    pub fn toggle_audio(&mut self) {
+        self.toggle_kind(Kind::Audio);
+    }
+
+    /// Marca o item como `kind`; apertar de novo volta pra vídeo.
+    fn toggle_kind(&mut self, kind: Kind) {
         let selected = self.items.get_mut(self.selected);
         if let Some(item) = selected.filter(|i| i.phase == Phase::Queued) {
-            item.kind = match item.kind {
-                Kind::Video => Kind::Gif,
-                Kind::Gif => Kind::Video,
-            };
+            item.kind = if item.kind == kind { Kind::Video } else { kind };
         }
     }
 
@@ -208,6 +215,17 @@ mod tests {
         app.items[0].phase = Phase::Downloading;
         app.toggle_gif();
         assert_eq!(app.items[0].kind, Kind::Gif);
+    }
+
+    #[test]
+    fn toggle_audio_switches_from_gif_and_back() {
+        let mut app = app_with(&yt_url());
+        app.add_url().unwrap();
+        app.toggle_gif();
+        app.toggle_audio();
+        assert_eq!(app.items[0].kind, Kind::Audio);
+        app.toggle_audio();
+        assert_eq!(app.items[0].kind, Kind::Video);
     }
 
     #[test]

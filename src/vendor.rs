@@ -265,7 +265,8 @@ mod tests {
         let (yt, ff) = ensure_binaries(&app).await.unwrap();
         // Arquivo de uma rodada anterior faz o yt-dlp pular o download (e o progresso).
         for ext in ["mp4", "gif"] {
-            let old = crate::downloader::downloads_dir().join(format!("Comet - Me at the zoo.{ext}"));
+            let old =
+                crate::downloader::downloads_dir().join(format!("Comet - Me at the zoo.{ext}"));
             let _ = std::fs::remove_file(old);
         }
         crate::downloader::download(&app, 0, &yt, &ff)
@@ -305,7 +306,9 @@ mod tests {
             saved: None,
         });
         let (yt, ff) = ensure_binaries(&app).await.unwrap();
-        crate::downloader::download(&app, 0, &yt, &ff).await.unwrap();
+        crate::downloader::download(&app, 0, &yt, &ff)
+            .await
+            .unwrap();
         let a = app.lock().await;
         assert_eq!(a.items[0].error, None);
         assert!(a.items[0].title.contains('😘'), "{:?}", a.items[0].title);
@@ -338,5 +341,20 @@ mod tests {
         assert_eq!(a.items[0].info.duration_secs, Some(19));
         let p = &a.items[0].progress;
         assert!(p.downloaded > 0 && p.total.is_some(), "progresso: {p:?}");
+    }
+
+    #[tokio::test]
+    #[ignore = "download real de rede; rodar com `cargo test --ignored`"]
+    async fn real_youtube_mp3_download() {
+        let app = real_zoo_download(crate::app::Kind::Audio).await;
+        let a = app.lock().await;
+        let saved = a.items[0].saved.clone().expect("caminho salvo");
+        assert_eq!(
+            saved.extension().and_then(|e| e.to_str()),
+            Some("mp3"),
+            "{saved:?}"
+        );
+        assert!(saved.is_file(), "{saved:?}");
+        let _ = std::fs::remove_file(saved);
     }
 }

@@ -125,7 +125,9 @@ async fn main() -> Result<()> {
             }
             pasting = is_paste_burst(pending.make_contiguous());
         }
-        let Some(ev) = pending.pop_front() else { continue };
+        let Some(ev) = pending.pop_front() else {
+            continue;
+        };
         match ev {
             Event::Paste(text) => {
                 app.lock().await.input = text.trim().to_string();
@@ -152,13 +154,12 @@ async fn main() -> Result<()> {
                         tokio::spawn(async move { run_queue(handle).await });
                     }
                     KeyCode::Char('g') | KeyCode::Char('G') if hotkey => a.toggle_gif(),
+                    KeyCode::Char('m') | KeyCode::Char('M') if hotkey => a.toggle_audio(),
                     KeyCode::Char('o') | KeyCode::Char('O') if hotkey => {
                         let file = a.items.get(a.selected).and_then(|i| i.saved.clone());
                         open_in_explorer(file.as_deref().filter(|f| f.is_file()), &a.out_dir);
                     }
-                    KeyCode::Char('h') | KeyCode::Char('H') if hotkey => {
-                        a.toggle_history()
-                    }
+                    KeyCode::Char('h') | KeyCode::Char('H') if hotkey => a.toggle_history(),
                     KeyCode::Char('q') | KeyCode::Char('Q') if hotkey && !a.busy => {
                         a.should_quit = true
                     }
@@ -198,7 +199,9 @@ async fn main() -> Result<()> {
                     KeyCode::Up if a.show_history => {
                         a.history_sel = a.history_sel.saturating_sub(1);
                     }
-                    KeyCode::Up if a.input.is_empty() && a.selected == 0 && !a.history.is_empty() => {
+                    KeyCode::Up
+                        if a.input.is_empty() && a.selected == 0 && !a.history.is_empty() =>
+                    {
                         a.show_history = true;
                         a.history_sel = 0;
                     }
@@ -238,7 +241,11 @@ mod tests {
     use crossterm::event::KeyEvent;
 
     fn key(c: char, kind: KeyEventKind) -> Event {
-        Event::Key(KeyEvent::new_with_kind(KeyCode::Char(c), KeyModifiers::NONE, kind))
+        Event::Key(KeyEvent::new_with_kind(
+            KeyCode::Char(c),
+            KeyModifiers::NONE,
+            kind,
+        ))
     }
 
     #[test]

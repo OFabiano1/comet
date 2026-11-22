@@ -121,6 +121,7 @@ fn ext_of(item: &Item) -> &'static str {
     match item.kind {
         Kind::Video => "mp4",
         Kind::Gif => "gif",
+        Kind::Audio => "mp3",
     }
 }
 
@@ -208,10 +209,71 @@ fn progress_line(p: &Progress, width: usize) -> Line<'static> {
     ])
 }
 
+/// Largura mínima pra mostrar o histórico ao lado da fila.
+const SPLIT_MIN_WIDTH: u16 = 110;
+const HISTORY_PANEL_WIDTH: u16 = 46;
+
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
     f.buffer_mut().set_style(area, Style::new().bg(BACKGROUND));
+    if area.width < SPLIT_MIN_WIDTH {
+        draw_main(f, area, app, app.show_history);
+        return;
+    }
+    // Largo: fila à esquerda, histórico sempre visível à direita; `h` passa o foco pra ele.
+    let panel = Rect {
+        x: area.x + area.width - HISTORY_PANEL_WIDTH,
+        width: HISTORY_PANEL_WIDTH,
+        ..area
+    };
+    draw_main(
+        f,
+        Rect {
+            width: area.width - HISTORY_PANEL_WIDTH,
+            ..area
+        },
+        app,
+        false,
+    );
+    draw_history_panel(f, panel, app);
+}
 
+fn draw_history_panel(f: &mut Frame, area: Rect, app: &App) {
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::LEFT)
+        .border_style(fg(TEXT_MUTED));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let inner = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(2),
+        y: inner.y + 1,
+        height: inner.height.saturating_sub(2),
+    };
+    if inner.height < 3 {
+        return;
+    }
+    let n = app.history.len();
+    let head = Paragraph::new(vec![
+        Line::from(Span::styled("HISTÓRICO", fg(TEXT_SECONDARY))),
+        Line::from(Span::styled(
+            format!("{n} {}", if n == 1 { "baixado" } else { "baixados" }),
+            fg(TEXT_MUTED),
+        )),
+    ]);
+    f.render_widget(head, Rect { height: 2, ..inner });
+    let body = Rect {
+        y: inner.y + 3,
+        height: inner.height - 3,
+        ..inner
+    };
+    f.render_widget(
+        Paragraph::new(history_lines(app, body, app.show_history)),
+        body,
+    );
+}
+
+fn draw_main(f: &mut Frame, area: Rect, app: &App, hist: bool) {
     let compact = area.height < 16;
     let spacer = if compact { 0 } else { 1 };
     let item_h = 3u16;
@@ -229,7 +291,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         let max_items = (space_for_body / item_h).max(1);
         (app.items.len() as u16).min(max_items)
     };
-    let body_h = if app.show_history {
+    let body_h = if hist {
         space_for_body.max(2)
     } else if app.items.is_empty() {
         empty_h
@@ -347,7 +409,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     f.render_widget(Paragraph::new(Line::from(hint)), chunks[5]);
 
     // Cabeçalho da fila (ou do histórico) + contador.
-    let (head, count) = if app.show_history {
+    let (head, count) = if hist {
         let n = app.history.len();
         let baixados = if n == 1 { "baixado" } else { "baixados" };
         ("HISTÓRICO", format!("{n} {baixados}"))
@@ -362,7 +424,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         chunks[7],
     );
     // Destino na mesma linha do rótulo: a pasta muda com o `cd`, então fica à vista.
-    if !app.show_history {
+    if !hist {
         let dest = short_dir(&app.out_dir).unwrap_or_default();
         let room = (chunks[7].width as usize).saturating_sub(head.chars().count() + 10);
         f.render_widget(
@@ -380,31 +442,8 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // Corpo: histórico, itens da fila ou estado vazio.
     let body = chunks[8];
-    if app.show_history {
-        let lines: Vec<Line> = if app.history.is_empty() {
-            vec![Line::from(Span::styled("nenhum download ainda", fg(TEXT_SECONDARY)))]
-        } else {
-            let rows = body.height as usize;
-            let offset = app.history_sel.saturating_sub(rows.saturating_sub(1));
-            app.history
-                .iter()
-                .enumerate()
-                .skip(offset)
-                .take(rows)
-                .map(|(i, h)| {
-                    let sel = i == app.history_sel;
-                    let text = truncate_ellipsis(&h.label, (body.width as usize).saturating_sub(2));
-                    Line::from(vec![
-                        Span::styled(if sel { "▎" } else { " " }, fg(PRIMARY)),
-                        Span::styled(
-                            format!(" {text}"),
-                            fg(if sel { TEXT_PRIMARY } else { TEXT_SECONDARY }),
-                        ),
-                    ])
-                })
-                .collect()
-        };
-        f.render_widget(Paragraph::new(lines), body);
+    if hist {
+        f.render_widget(Paragraph::new(history_lines(app, body, true)), body);
     } else if app.items.is_empty() {
         f.render_widget(
             Paragraph::new(vec![
@@ -471,13 +510,42 @@ pub fn draw(f: &mut Frame, app: &App) {
             if app.show_history {
                 "↑↓ escolhe · enter baixa de novo · h volta à fila · q sai"
             } else {
-                "enter adiciona · d baixa · g gif · o pasta · h histórico · q sai"
+                "enter adiciona · d baixa · g gif · m mp3 · o pasta · h histórico · q sai"
             },
             fg(TEXT_MUTED),
         )))
         .alignment(Alignment::Center),
         chunks[10],
     );
+}
+
+/// Linhas do histórico; `focused` acende a seleção.
+fn history_lines(app: &App, body: Rect, focused: bool) -> Vec<Line<'static>> {
+    if app.history.is_empty() {
+        return vec![Line::from(Span::styled(
+            "nenhum download ainda",
+            fg(TEXT_SECONDARY),
+        ))];
+    }
+    let rows = body.height as usize;
+    let offset = app.history_sel.saturating_sub(rows.saturating_sub(1));
+    app.history
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(rows)
+        .map(|(i, h)| {
+            let sel = focused && i == app.history_sel;
+            let text = truncate_ellipsis(&h.label, (body.width as usize).saturating_sub(2));
+            Line::from(vec![
+                Span::styled(if sel { "▎" } else { " " }, fg(PRIMARY)),
+                Span::styled(
+                    format!(" {text}"),
+                    fg(if sel { TEXT_PRIMARY } else { TEXT_SECONDARY }),
+                ),
+            ])
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -643,13 +711,31 @@ mod tests {
             ..App::default()
         };
         assert!(render(&app, 80, 24).contains("salva em F\\Downloads"));
-        assert_eq!(short_dir(std::path::Path::new(r"D:\")).as_deref(), Some(r"D:\"));
+        assert_eq!(
+            short_dir(std::path::Path::new(r"D:\")).as_deref(),
+            Some(r"D:\")
+        );
         // Terminal estreito corta o começo do caminho, nunca passa da linha.
         let narrow = App {
             out_dir: std::path::PathBuf::from(r"C:\um\caminho bem comprido de verdade\Downloads"),
             ..App::default()
         };
         render(&narrow, 24, 20);
+    }
+
+    #[test]
+    fn wide_terminal_shows_queue_and_history_side_by_side() {
+        let app = App {
+            history: vec![crate::app::HistEntry {
+                label: "mp3 · youtube · Me at the zoo".into(),
+                url: String::new(),
+            }],
+            ..App::default()
+        };
+        let wide = render(&app, 120, 30);
+        assert!(wide.contains("FILA") && wide.contains("HISTÓRICO"));
+        assert!(wide.contains("mp3 · youtube · Me at the zoo"));
+        assert!(!render(&app, 80, 30).contains("HISTÓRICO"));
     }
 
     #[test]

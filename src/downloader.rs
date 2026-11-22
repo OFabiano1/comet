@@ -195,6 +195,7 @@ pub fn history_label(item: &Item) -> String {
     let kind = match item.kind {
         Kind::Video => "vídeo",
         Kind::Gif => "gif",
+        Kind::Audio => "mp3",
     };
     format!("{kind} · {} · {}", item.site.label(), item.title).replace(['\t', '\n'], " ")
 }
@@ -202,12 +203,20 @@ pub fn history_label(item: &Item) -> String {
 /// Anota um download concluído: "label\tcaminho\turl". Falha de escrita não derruba a fila.
 pub fn record_history(item: &Item) -> HistEntry {
     let label = history_label(item);
-    let path = item.saved.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    let path = item
+        .saved
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
     let file = history_path();
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&file) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+    {
         let _ = writeln!(f, "{label}\t{path}\t{}", item.url);
     }
     HistEntry {
@@ -239,7 +248,11 @@ pub fn is_chosen_dir(
     exe_dir: Option<&Path>,
     windows: Option<&Path>,
 ) -> bool {
-    let norm = |p: &Path| p.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase();
+    let norm = |p: &Path| {
+        p.to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .to_lowercase()
+    };
     let cwd = norm(cwd);
     let same = |p: Option<&Path>| p.is_some_and(|p| norm(p) == cwd);
     let inside = |p: Option<&Path>| {
@@ -294,13 +307,18 @@ pub async fn download(
     ytdlp: &Path,
     ffmpeg: &Path,
 ) -> Result<()> {
-    let (url, site, out_dir) = {
+    let (url, site, out_dir, audio) = {
         let mut a = app.lock().await;
         let out_dir = a.out_dir.clone();
         let item = &mut a.items[idx];
         item.phase = Phase::Downloading;
         item.progress = Progress::default();
-        (item.url.clone(), item.site, out_dir)
+        (
+            item.url.clone(),
+            item.site,
+            out_dir,
+            item.kind == Kind::Audio,
+        )
     };
     tokio::fs::create_dir_all(&out_dir).await?;
 
@@ -313,8 +331,13 @@ pub async fn download(
         "--progress".to_string(),
         "--newline".to_string(),
         "--no-playlist".to_string(),
-        "--merge-output-format".to_string(),
-        "mp4".to_string(),
+    ];
+    if audio {
+        args.extend(["-x", "--audio-format", "mp3"].map(String::from));
+    } else {
+        args.extend(["--merge-output-format", "mp4"].map(String::from));
+    }
+    args.extend([
         "--progress-template".to_string(),
         PROGRESS_TEMPLATE.to_string(),
         "--print".to_string(),
@@ -325,7 +348,7 @@ pub async fn download(
         "INFO:%(uploader,channel)s|%(duration)s".to_string(),
         "-o".to_string(),
         output_template(site).to_string(),
-    ];
+    ]);
     args.extend(title_cleanup_args());
     args.push("--ffmpeg-location".to_string());
     args.push(ffmpeg.display().to_string());
@@ -637,9 +660,18 @@ mod tests {
 
     #[test]
     fn output_names_start_with_comet_and_title() {
-        assert_eq!(output_template(Site::YouTube), "Comet - %(title).80B.%(ext)s");
-        assert_eq!(output_template(Site::Twitter), "Comet - %(title).60B.%(ext)s");
-        assert_eq!(output_template(Site::TikTok), "Comet - %(title).60B.%(ext)s");
+        assert_eq!(
+            output_template(Site::YouTube),
+            "Comet - %(title).80B.%(ext)s"
+        );
+        assert_eq!(
+            output_template(Site::Twitter),
+            "Comet - %(title).60B.%(ext)s"
+        );
+        assert_eq!(
+            output_template(Site::TikTok),
+            "Comet - %(title).60B.%(ext)s"
+        );
         let args = title_cleanup_args();
         assert_eq!(args.len(), 12);
         assert_eq!(
