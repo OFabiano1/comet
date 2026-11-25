@@ -28,10 +28,16 @@ mod tests {
     use super::*;
 
     fn luminance(c: Color) -> f64 {
-        let Color::Rgb(r, g, b) = c else { panic!("só Rgb") };
+        let Color::Rgb(r, g, b) = c else {
+            panic!("só Rgb")
+        };
         let ch = |v: u8| {
             let s = v as f64 / 255.0;
-            if s <= 0.03928 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+            if s <= 0.03928 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            }
         };
         0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
     }
@@ -45,7 +51,14 @@ mod tests {
     #[test]
     fn prism_contrast_minimums_hold() {
         for bg in [BACKGROUND, SURFACE] {
-            for text in [TEXT_PRIMARY, TEXT_SECONDARY, TEXT_BRAND, SUCCESS, WARNING, DANGER] {
+            for text in [
+                TEXT_PRIMARY,
+                TEXT_SECONDARY,
+                TEXT_BRAND,
+                SUCCESS,
+                WARNING,
+                DANGER,
+            ] {
                 assert!(contrast(text, bg) >= 4.5, "{text:?} em {bg:?}");
             }
             for graphic in [PRIMARY, PRIMARY_HOVER] {

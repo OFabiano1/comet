@@ -353,71 +353,88 @@ pub async fn download(
     args.push("--ffmpeg-location".to_string());
     args.push(ffmpeg.display().to_string());
     // YouTube não precisa de login; ler cookies do Chrome aberto só faria ele falhar
-    if site != Site::YouTube {
-        args.extend(browser_cookie_args());
-    }
-    args.push(url.clone());
+    let cookies = if site != Site::YouTube {
+        browser_cookie_args()
+    } else {
+        Vec::new()
+    };
+    let mut use_cookies = !cookies.is_empty();
 
-    let mut child = tokio::process::Command::new(ytdlp)
-        .args(&args)
-        .current_dir(&out_dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        // Esc no meio do download não deixa yt-dlp órfão rodando.
-        .kill_on_drop(true)
-        .spawn()?;
+    // Se o navegador não deixa ler os cookies (DPAPI/banco travado), tenta de novo sem eles:
+    // TikTok e boa parte do Twitter/X funcionam sem login.
+    let (final_path, err_tail, status) = loop {
+        let mut run_args = args.clone();
+        if use_cookies {
+            run_args.extend(cookies.iter().cloned());
+        }
+        run_args.push(url.clone());
 
-    let stdout = child.stdout.take().expect("stdout piped");
-    let stderr = child.stderr.take().expect("stderr piped");
-    let app2 = app.clone();
-    let out_task = tokio::spawn(async move {
-        use tokio::io::AsyncBufReadExt;
-        let mut reader = tokio::io::BufReader::new(stdout);
-        let mut final_path = None;
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line).await {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {
-                    let l = line.trim_end();
-                    if let Some(p) = parse_progress(l) {
-                        app2.lock().await.items[idx].progress = p;
-                    } else if let Some(title) = parse_title(l) {
-                        app2.lock().await.items[idx].title = title;
-                    } else if let Some(info) = parse_info(l) {
-                        app2.lock().await.items[idx].info = info;
-                    } else if let Some(path) = parse_saved(l) {
-                        final_path = Some(path);
+        let mut child = tokio::process::Command::new(ytdlp)
+            .args(&run_args)
+            .current_dir(&out_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            // Esc no meio do download não deixa yt-dlp órfão rodando.
+            .kill_on_drop(true)
+            .spawn()?;
+
+        let stdout = child.stdout.take().expect("stdout piped");
+        let stderr = child.stderr.take().expect("stderr piped");
+        let app2 = app.clone();
+        let out_task = tokio::spawn(async move {
+            use tokio::io::AsyncBufReadExt;
+            let mut reader = tokio::io::BufReader::new(stdout);
+            let mut final_path = None;
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let l = line.trim_end();
+                        if let Some(p) = parse_progress(l) {
+                            app2.lock().await.items[idx].progress = p;
+                        } else if let Some(title) = parse_title(l) {
+                            app2.lock().await.items[idx].title = title;
+                        } else if let Some(info) = parse_info(l) {
+                            app2.lock().await.items[idx].info = info;
+                        } else if let Some(path) = parse_saved(l) {
+                            final_path = Some(path);
+                        }
                     }
                 }
             }
-        }
-        final_path
-    });
-    let err_task = tokio::spawn(async move {
-        use tokio::io::AsyncBufReadExt;
-        let mut reader = tokio::io::BufReader::new(stderr);
-        let mut tail: Vec<String> = Vec::new();
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line).await {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {
-                    tail.push(line.trim_end().to_string());
-                    if tail.len() > 12 {
-                        tail.remove(0);
+            final_path
+        });
+        let err_task = tokio::spawn(async move {
+            use tokio::io::AsyncBufReadExt;
+            let mut reader = tokio::io::BufReader::new(stderr);
+            let mut tail: Vec<String> = Vec::new();
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        tail.push(line.trim_end().to_string());
+                        if tail.len() > 12 {
+                            tail.remove(0);
+                        }
                     }
                 }
             }
-        }
-        tail
-    });
+            tail
+        });
 
-    let final_path = out_task.await.unwrap_or(None);
-    let err_tail = err_task.await.unwrap_or_default();
-    let status = child.wait().await?;
+        let final_path = out_task.await.unwrap_or(None);
+        let err_tail = err_task.await.unwrap_or_default();
+        let status = child.wait().await?;
+        if !status.success() && use_cookies && err_tail.iter().any(|l| l.contains("DPAPI")) {
+            use_cookies = false;
+            continue;
+        }
+        break (final_path, err_tail, status);
+    };
 
     let (kind, ok) = {
         let mut a = app.lock().await;

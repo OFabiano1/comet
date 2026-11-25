@@ -35,7 +35,9 @@ fn host_from(host: &str, path: &str) -> Option<Site> {
     match host {
         // só link de vídeo: canal ou playlist baixaria tudo
         "youtube.com" | "m.youtube.com"
-            if ["watch?", "shorts/", "live/"].iter().any(|p| path.starts_with(p)) =>
+            if ["watch?", "shorts/", "live/"]
+                .iter()
+                .any(|p| path.starts_with(p)) =>
         {
             Some(Site::YouTube)
         }
@@ -92,7 +94,13 @@ mod tests {
         assert_eq!(detect("https://www.youtube.com/playlist?list=PL1"), None);
         assert_eq!(detect("https://youtube.com/channel/UC1"), None);
         assert_eq!(detect("https://youtu.be/"), None);
-        assert_eq!(detect("https://youtube.com/shorts/abc"), Some(Site::YouTube));
-        assert_eq!(detect("https://m.youtube.com/live/abc"), Some(Site::YouTube));
+        assert_eq!(
+            detect("https://youtube.com/shorts/abc"),
+            Some(Site::YouTube)
+        );
+        assert_eq!(
+            detect("https://m.youtube.com/live/abc"),
+            Some(Site::YouTube)
+        );
     }
 }
