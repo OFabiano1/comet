@@ -20,10 +20,11 @@ Baixador de vídeos no terminal. Cola a URL, aperta Enter, pronto.
 
 ## Uso
 
-```
-comet.exe
-```
+**Duplo clique no `comet.exe`** abre a janela: cola o link (Ctrl+V) e ele já começa
+a baixar. Escolha vídeo, GIF ou MP3 antes de colar. Os arquivos vão para
+`Downloads\Comet`.
 
+**No terminal**, `comet` abre a versão de terminal (`comet --app` abre a janela).
 Cole a URL (Ctrl+V) no campo e aperte **Enter**. Depois:
 
 | Tecla | Ação |
@@ -31,6 +32,7 @@ Cole a URL (Ctrl+V) no campo e aperte **Enter**. Depois:
 | `Enter` | Adiciona URL à fila |
 | `D` | Baixa a fila |
 | `G` | Alterna GIF no item selecionado (Twitter) |
+| `M` | Alterna MP3 no item selecionado |
 | `O` | Abre a pasta com o arquivo do item selecionado já marcado |
 | `H` | Abre o histórico; `Enter` nele baixa de novo |
 | `↑` / `↓` | Move a seleção |

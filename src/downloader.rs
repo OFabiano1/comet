@@ -111,6 +111,8 @@ pub fn parse_progress(line: &str) -> Option<Progress> {
     })
 }
 
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 pub const GIF_FAILED: &str = "gif falhou, o mp4 ficou salvo";
 
 pub fn parse_error(stderr: &str) -> String {
@@ -372,6 +374,10 @@ pub async fn download(
         let mut child = tokio::process::Command::new(ytdlp)
             .args(&run_args)
             .current_dir(&out_dir)
+            // Aberto pela janela não há console: stdin herdado é inválido (os error 50)
+            // e sem CREATE_NO_WINDOW o yt-dlp abriria uma janela preta própria.
+            .stdin(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             // Esc no meio do download não deixa yt-dlp órfão rodando.
@@ -497,6 +503,7 @@ pub fn gif_args(input: &Path, png: &Path, out: &Path) -> Vec<String> {
 async fn run_ffmpeg(ffmpeg: &Path, args: &[String]) -> Result<()> {
     let out = tokio::process::Command::new(ffmpeg)
         .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .await?;
     if out.status.success() {

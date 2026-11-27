@@ -157,7 +157,7 @@ pub fn human_duration(secs: u64) -> String {
 }
 
 /// À direita do título: "faltam 6.9 MB · ~12s", ou só o baixado se o total não veio.
-fn remaining_text(p: &Progress) -> String {
+pub fn remaining_text(p: &Progress) -> String {
     let Some(left) = p.remaining() else {
         return format!("{} baixados", human_bytes(p.downloaded));
     };
@@ -168,7 +168,7 @@ fn remaining_text(p: &Progress) -> String {
 }
 
 /// "youtube · mp4 · jawed · 0:19" — canal e duração entram quando o yt-dlp manda.
-fn meta_text(item: &Item) -> String {
+pub fn meta_text(item: &Item) -> String {
     let mut parts = vec![item.site.label().to_string(), ext_of(item).to_string()];
     if !item.info.channel.is_empty() {
         parts.push(item.info.channel.clone());

@@ -1,5 +1,6 @@
 mod app;
 mod downloader;
+mod gui;
 mod sites;
 mod theme;
 mod ui;
@@ -99,8 +100,32 @@ fn open_in_explorer(file: Option<&std::path::Path>, dir: &std::path::Path) {
     let _ = cmd.spawn();
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetConsoleProcessList(list: *mut u32, count: u32) -> u32;
+    fn FreeConsole() -> i32;
+}
+
+/// Duplo clique: o Windows criou um console só pro Comet, então ele é o único processo nele.
+/// Rodando num terminal, o shell também está no console.
+fn opened_by_double_click() -> bool {
+    let mut ids = [0u32; 2];
+    unsafe { GetConsoleProcessList(ids.as_mut_ptr(), ids.len() as u32) == 1 }
+}
+
+fn main() -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()?;
+    let wants_app = std::env::args().any(|a| a == "--app");
+    if wants_app || opened_by_double_click() {
+        if !wants_app {
+            unsafe { FreeConsole() }; // fecha a janela preta; quem fica é a do app
+        }
+        return gui::run(rt);
+    }
+    rt.block_on(tui())
+}
+
+async fn tui() -> Result<()> {
     let mut terminal = Terminal::new()?;
     let app = Arc::new(Mutex::new(App {
         history: downloader::load_history(),
