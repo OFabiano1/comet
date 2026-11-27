@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comet: baixador de vídeo no terminal</title>
+<meta name="description" content="Comet baixa vídeo do YouTube, Twitter/X e TikTok direto do terminal do Windows. Cola o link, aperta Enter, pronto.">
+<meta property="og:title" content="Comet: baixador de vídeo no terminal">
+<meta property="og:description" content="YouTube, Twitter/X e TikTok. Cola o link, aperta Enter, pronto.">
+<meta property="og:image" content="https://ofabiano1.github.io/comet/img/2-baixando.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --background: #09090D;
+    --surface: #101015;
+    --surface-elevated: #15151C;
+    --prism-primary: #8F00FF;
+    --prism-primary-hover: #A34AFF;
+    --text-brand: #C085FF;
+    --text-primary: #F0F0F4;
+    --text-secondary: #90909D;
+    --border-default: #292933;
+    --display: "Space Grotesk", system-ui, sans-serif;
+    --body: "Inter", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--text-primary);
+    font: 400 16px/1.6 var(--body);
+  }
+  a { color: var(--text-brand); }
+  a:focus-visible, .btn:focus-visible {
+    outline: 2px solid var(--prism-primary-hover);
+    outline-offset: 2px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  header.top {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 0; font: 500 14px/1 var(--mono);
+  }
+  header.top .mark { color: var(--text-primary); text-decoration: none; letter-spacing: .02em; }
+  header.top .mark span { color: var(--prism-primary); }
+  header.top nav { display: flex; gap: 20px; }
+  header.top nav a { color: var(--text-secondary); text-decoration: none; }
+  header.top nav a:hover { color: var(--text-primary); }
+
+  .hero { padding: 72px 0 56px; }
+  .overline {
+    font: 500 11px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+    color: var(--text-secondary); margin: 0 0 16px;
+  }
+  h1 {
+    font: 700 80px/.92 var(--display); letter-spacing: -.04em; margin: 0 0 24px;
+  }
+  h1 .dot { color: var(--prism-primary); }
+  .lead { font-size: 18px; color: var(--text-secondary); max-width: 34em; margin: 0 0 32px; }
+  .lead strong { color: var(--text-primary); font-weight: 500; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px; min-height: 48px;
+    padding: 0 22px; border-radius: 8px; text-decoration: none;
+    font: 600 16px/1 var(--body);
+  }
+  .btn-primary { background: var(--prism-primary); color: #FFFFFF; }
+  .btn-primary:hover { background: #7A00DB; }
+  .btn-ghost { border: 1px solid var(--border-default); color: var(--text-primary); }
+  .btn-ghost:hover { border-color: var(--text-secondary); }
+  .meta { font: 400 13px/1.4 var(--mono); color: var(--text-secondary); margin-top: 14px; }
+
+  .shot {
+    margin: 56px 0 0; border: 1px solid var(--border-default); border-radius: 10px;
+    overflow: hidden; background: var(--surface);
+  }
+  .shot img { display: block; width: 100%; height: auto; }
+
+  section { padding: 64px 0; border-top: 1px solid var(--border-default); }
+  .sec-head { display: grid; grid-template-columns: 64px 1fr; gap: 0 16px; margin-bottom: 32px; }
+  .num { font: 500 14px/2.2 var(--mono); color: var(--text-brand); }
+  h2 { font: 700 32px/1.2 var(--display); letter-spacing: -.02em; margin: 0; }
+  .sec-body { margin-left: 80px; }
+
+  ol.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 24px;
+    grid-template-columns: repeat(3, 1fr); }
+  ol.steps li { border-left: 2px solid var(--prism-primary); padding: 4px 0 4px 16px; }
+  ol.steps h3 { font: 600 16px/1.4 var(--body); margin: 0 0 6px; }
+  ol.steps p { margin: 0; color: var(--text-secondary); font-size: 15px; }
+
+  code, kbd { font-family: var(--mono); font-size: .9em; }
+  kbd {
+    display: inline-block; min-width: 1.9em; text-align: center; padding: 2px 7px;
+    background: var(--surface-elevated); border: 1px solid var(--border-default);
+    border-radius: 4px; color: var(--text-primary);
+  }
+  p code { color: var(--text-brand); }
+
+  .sites { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 0 0 24px; padding: 0; list-style: none; }
+  .sites li { font: 500 20px/1.4 var(--display); }
+  .sites small { display: block; font: 400 13px/1.4 var(--mono); color: var(--text-secondary); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 12px 0; border-bottom: 1px solid var(--border-default); vertical-align: top; }
+  th { font: 500 11px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--text-secondary); }
+  td:first-child { width: 140px; white-space: nowrap; }
+
+  .notes { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+  .notes h3 { font: 600 16px/1.4 var(--body); margin: 0 0 8px; }
+  .notes p { margin: 0; color: var(--text-secondary); font-size: 15px; }
+
+  footer { border-top: 1px solid var(--border-default); padding: 32px 0 48px;
+    font: 400 13px/1.6 var(--mono); color: var(--text-secondary);
+    display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+
+  @media (max-width: 760px) {
+    h1 { font-size: 48px; }
+    .hero { padding: 40px 0 40px; }
+    .sec-head { grid-template-columns: 1fr; }
+    .sec-body { margin-left: 0; }
+    ol.steps, .notes { grid-template-columns: 1fr; }
+    header.top nav a.hide-sm { display: none; }
+    td:first-child { width: 96px; }
+    .btn { width: 100%; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="mark" href="./"><span>☄</span> comet</a>
+    <nav aria-label="Principal">
+      <a class="hide-sm" href="#como-usar">como usar</a>
+      <a class="hide-sm" href="#teclas">teclas</a>
+      <a href="https://github.com/OFabiano1/comet">github</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <p class="overline">Axolotl BR · ferramenta</p>
+      <h1>Comet<span class="dot">.</span></h1>
+      <p class="lead">Baixador de vídeo no terminal do Windows. <strong>Cola o link, aperta Enter, pronto.</strong> YouTube, Twitter/X e TikTok, com fila, GIF de verdade e MP3.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/OFabiano1/comet/releases/latest/download/comet.exe">Baixar comet.exe</a>
+        <a class="btn btn-ghost" href="https://github.com/OFabiano1/comet/releases">Todas as versões</a>
+      </div>
+      <p class="meta">Windows 10/11 · um arquivo .exe, sem instalador · código aberto (MIT)</p>
+
+      <figure class="shot">
+        <img src="img/2-baixando.png" width="1696" height="1376"
+          alt="Tela do Comet no terminal: campo de link, fila com dois vídeos e barra de progresso em 64%.">
+      </figure>
+    </div>
+
+    <section id="como-usar" aria-labelledby="h-usar">
+      <div class="sec-head"><span class="num">001</span><h2 id="h-usar">Como usar</h2></div>
+      <div class="sec-body">
+        <ol class="steps">
+          <li><h3>Abre o Comet</h3><p>Dá dois cliques no <code>comet.exe</code> ou roda <code>comet</code> num terminal.</p></li>
+          <li><h3>Cola o link</h3><p><kbd>Ctrl</kbd>+<kbd>V</kbd> no campo e <kbd>Enter</kbd>. Dá pra colar vários, eles vão pra fila.</p></li>
+          <li><h3>Baixa</h3><p>Aperta <kbd>D</kbd>. A barra mostra quanto falta e a velocidade. <kbd>O</kbd> abre a pasta com o arquivo marcado.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <section id="sites" aria-labelledby="h-sites">
+      <div class="sec-head"><span class="num">002</span><h2 id="h-sites">O que ele baixa</h2></div>
+      <div class="sec-body">
+        <ul class="sites">
+          <li>YouTube<small>vídeo ou MP3</small></li>
+          <li>Twitter/X<small>vídeo ou GIF</small></li>
+          <li>TikTok<small>vídeo</small></li>
+        </ul>
+        <p>O GIF do Twitter sai como <code>.gif</code> real, com paleta otimizada pelo ffmpeg, não um mp4 renomeado. Canal e playlist do YouTube ficam de fora: é um vídeo por link.</p>
+      </div>
+    </section>
+
+    <section id="teclas" aria-labelledby="h-teclas">
+      <div class="sec-head"><span class="num">003</span><h2 id="h-teclas">Teclas</h2></div>
+      <div class="sec-body">
+        <table>
+          <thead><tr><th scope="col">Tecla</th><th scope="col">O que faz</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>Enter</kbd></td><td>Adiciona o link à fila</td></tr>
+            <tr><td><kbd>D</kbd></td><td>Baixa a fila</td></tr>
+            <tr><td><kbd>G</kbd></td><td>Alterna GIF no item selecionado (Twitter)</td></tr>
+            <tr><td><kbd>M</kbd></td><td>Alterna MP3 no item selecionado</td></tr>
+            <tr><td><kbd>O</kbd></td><td>Abre a pasta com o arquivo já marcado</td></tr>
+            <tr><td><kbd>H</kbd></td><td>Abre o histórico; <kbd>Enter</kbd> nele baixa de novo</td></tr>
+            <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Move a seleção</td></tr>
+            <tr><td><kbd>Q</kbd> <kbd>Esc</kbd></td><td>Sai</td></tr>
+          </tbody>
+        </table>
+        <p class="meta">As teclas de comando só valem com o campo de link vazio.</p>
+      </div>
+    </section>
+
+    <section id="detalhes" aria-labelledby="h-detalhes">
+      <div class="sec-head"><span class="num">004</span><h2 id="h-detalhes">Bom saber</h2></div>
+      <div class="sec-body notes">
+        <div><h3>Onde o arquivo cai</h3><p>Na pasta onde o terminal está: <code>cd Downloads</code> e depois <code>comet</code> salva em Downloads. Com duplo clique no exe, vai para <code>Downloads\Comet</code>. O nome fica <code>Comet - &lt;título&gt;</code>.</p></div>
+        <div><h3>Primeiro uso</h3><p>O Comet baixa sozinho o <code>yt-dlp</code> e o <code>ffmpeg</code> para <code>%LOCALAPPDATA%\comet\bin</code> e mostra o progresso na tela. Depois disso, abre direto.</p></div>
+        <div><h3>Twitter/X e TikTok</h3><p>Essas plataformas pedem cookies. O Comet usa os do Chrome, Edge ou Brave instalados na máquina. Post privado ou que pede login não baixa: o Comet não tem login, de propósito.</p></div>
+        <div><h3>Aviso do Windows</h3><p>O exe não é assinado, então o SmartScreen pode avisar na primeira vez. Clica em <em>Mais informações</em> e <em>Executar assim mesmo</em>. O código está todo no GitHub.</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Comet · de player para player · <a href="https://discord.gg/8WtmZTySdB">discord.gg/8WtmZTySdB</a></span>
+    <span><a href="https://github.com/OFabiano1/comet">código</a> · <a href="https://github.com/OFabiano1/comet/blob/main/LICENSE">MIT</a></span>
+  </footer>
+</div>
+</body>
+</html>
